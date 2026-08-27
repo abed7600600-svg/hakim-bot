@@ -1,27 +1,23 @@
 from datetime import datetime
 import json
 import time
-import urllib.parse
 import urllib.request
 
-# ==========================================
-# رادار عبد الحكيم رائد - العقود الآجلة والأخبار 24/7
-# ==========================================
 BOT_TOKEN = "8641484254:AAGs6MFyxo52A_Y2bkznogpZ9-s9g6NbjXk"
 CHAT_ID = "8493446835"
 
 
 def send_telegram(text):
-  url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+  url = "https://api.telegram.org/bot" + BOT_TOKEN + "/sendMessage"
   data = json.dumps({"chat_id": CHAT_ID, "text": text}).encode("utf-8")
   req = urllib.request.Request(
       url, data=data, headers={"Content-Type": "application/json"}
   )
   try:
-    with urllib.request.urlopen(req, timeout=15) as r:
-      pass
+    with urllib.request.urlopen(req, timeout=10) as r:
+      print("Delivered")
   except Exception as e:
-    print(f"Telegram Error: {e}")
+    print("Telegram Error:", e)
 
 
 def get_json(url):
@@ -33,18 +29,8 @@ def get_json(url):
           )
       },
   )
-  with urllib.request.urlopen(req, timeout=15) as r:
+  with urllib.request.urlopen(req, timeout=10) as r:
     return json.loads(r.read().decode("utf-8"))
-
-
-def translate_to_arabic(text):
-  try:
-    q = urllib.parse.quote(text[:250])
-    url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=ar&dt=t&q={q}"
-    res = get_json(url)
-    return "".join([i[0] for i in res[0] if i[0]])
-  except Exception:
-    return text
 
 
 def calculate_rsi(closes, period=14):
@@ -64,55 +50,17 @@ def calculate_rsi(closes, period=14):
 
 
 send_telegram(
-    "🚀 تم تفعيل رادار عبد الحكيم رائد الشامل (Futures & News 24/7) بنجاح!\nجاري"
-    " بث الأخبار الحية وفحص عقود بينانس الآجلة فقط..."
+    "⚡ تم تفعيل رادار العقود الآجلة السريع بنجاح!\n(Binance Futures"
+    " 24/7)\nسيبدأ الآن تدفق التقارير والصفقات كل 25 إلى 30 ثانية..."
 )
 
 EXCLUDED = ["USDCUSDT", "FDUSDUSDT", "TUSDUSDT", "BUSDUSDT", "EURUSDT"]
-seen_news_ids = set()
-news_index = 0
 loop_count = 0
 
 while True:
   loop_count += 1
   now_str = datetime.utcnow().strftime("%H:%M:%S UTC")
 
-  # 1. جلب وبث الأخبار العالمية المترجمة
-  try:
-    news_res = get_json(
-        "https://min-api.cryptocompare.com/data/v2/news/?lang=EN"
-    )
-    if "Data" in news_res and len(news_res["Data"]) > 0:
-      item = news_res["Data"][news_index % len(news_res["Data"])]
-      news_id = item.get("id")
-
-      if news_id not in seen_news_ids:
-        seen_news_ids.add(news_id)
-        source = item.get("source_info", {}).get("name", "Crypto News")
-        t_en = item.get("title", "")
-        b_en = item.get("body", "")[:120] + "..."
-        link = item.get("url", "")
-
-        t_ar = translate_to_arabic(t_en)
-        b_ar = translate_to_arabic(b_en)
-
-        news_msg = (
-            "📰 خبر عاجل | رادار عبد الحكيم رائد\n"
-            "━━━━━━━━━━━━━━━━━━\n"
-            f"🌐 المصدر: {source} | ⏱ {now_str}\n\n"
-            f"📌 العنوان: {t_ar}\n\n"
-            f"📝 التفاصيل: {b_ar}\n"
-            "━━━━━━━━━━━━━━━━━━\n"
-            f"🔗 الرابط والمصدر: {link}"
-        )
-        send_telegram(news_msg)
-        news_index += 1
-  except Exception as e:
-    print(f"News error: {e}")
-
-  time.sleep(15)
-
-  # 2. فحص العقود الآجلة الحية على بينانس
   try:
     data = get_json("https://fapi.binance.com/fapi/v1/ticker/24hr")
     if isinstance(data, list) and len(data) > 0:
@@ -134,7 +82,6 @@ while True:
           reverse=True,
       )
 
-      # إرسال تقرير نبض العقود الآجلة
       g = by_change[0]
       l = by_change[-1]
       v = by_volume[0]
@@ -149,6 +96,7 @@ while True:
       )
       v_info = f"#{v['symbol']} ({float(v['quoteVolume'])/1000000:.1f} مليون $)"
 
+      # إرسال التقرير اللحظي السريع
       market_msg = (
           "📊 رادار عبد الحكيم رائد | نبض العقود الآجلة (Futures)\n"
           "━━━━━━━━━━━━━━━━━━\n"
@@ -161,8 +109,8 @@ while True:
       )
       send_telegram(market_msg)
 
-      # فحص إشارات الشورت
-      for t in by_change[:10]:
+      # فحص إشارات الشورت لأعلى 5 عملات صاعدة
+      for t in by_change[:5]:
         sym = t["symbol"]
         change = float(t.get("priceChangePercent", 0))
         if change >= 5.0:
@@ -194,7 +142,7 @@ while True:
                 tp2 = round(last_c - (last_h - past_c) * 0.50, 4)
 
                 sig_msg = (
-                    "🚨 إشارة شورت عقود آجلة (Futures Alert) 🚨\n"
+                    "🚨 إشارة شورت في العقود الآجلة (Futures Alert) 🚨\n"
                     "👑 منظومة عبد الحكيم رائد للتحليل\n"
                     "━━━━━━━━━━━━━━━━━━\n"
                     f"📌 العملة: {sym}\n"
@@ -211,12 +159,11 @@ while True:
                     " برافعة 3x-5x ومخاطرة 1-2% فقط."
                 )
                 send_telegram(sig_msg)
-                time.sleep(2)
                 break
           except Exception:
             continue
   except Exception as e:
-    print(f"Futures error: {e}")
+    print(f"Error: {e}")
 
-  time.sleep(15)
-  
+  time.sleep(25)
+            
