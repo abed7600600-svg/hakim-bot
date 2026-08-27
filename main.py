@@ -1,29 +1,17 @@
 from datetime import datetime
 import json
 import time
-import urllib.parse
 import urllib.request
 
 # ==========================================
-# رادار عبد الحكيم رائد - الأخبار والصفقات 24/7
+# رادار عبد الحكيم رائد - الأخبار والتحليل والعقود 24/7
 # ==========================================
 BOT_TOKEN = "8641484254:AAGs6MFyxo52A_Y2bkznogpZ9-s9g6NbjXk"
 CHAT_ID = "8493446835"
 
-# قائمة العملات الملغاة والمستقرة المستبعدة نهائياً
-BLACKLIST = [
-    "CREAMUSDT",
-    "USDCUSDT",
-    "FDUSDUSDT",
-    "TUSDUSDT",
-    "BUSDUSDT",
-    "EURUSDT",
-    "AEURUSDT",
-]
-
 
 def send_telegram(text):
-  url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+  url = "https://api.telegram.org/bot" + BOT_TOKEN + "/sendMessage"
   data = json.dumps({"chat_id": CHAT_ID, "text": text}).encode("utf-8")
   req = urllib.request.Request(
       url, data=data, headers={"Content-Type": "application/json"}
@@ -32,7 +20,7 @@ def send_telegram(text):
     with urllib.request.urlopen(req, timeout=15) as r:
       pass
   except Exception as e:
-    print(f"Telegram Error: {e}")
+    print("Telegram Error:", e)
 
 
 def get_json(url):
@@ -48,14 +36,68 @@ def get_json(url):
     return json.loads(r.read().decode("utf-8"))
 
 
-def translate_to_arabic(text):
-  try:
-    q = urllib.parse.quote(text[:250])
-    url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=ar&dt=t&q={q}"
-    res = get_json(url)
-    return "".join([i[0] for i in res[0] if i[0]])
-  except Exception:
-    return text
+# خوارزمية تحليل أثر الخبر على السوق
+def analyze_news_impact(title, body):
+  text = (title + " " + body).lower()
+  bullish_keywords = [
+      "surge",
+      "rally",
+      "approval",
+      "record",
+      "high",
+      "jump",
+      "inflow",
+      "gain",
+      "buy",
+      "bull",
+      "etf",
+      "launch",
+      "partnership",
+      "growth",
+      "soar",
+      "adopt",
+  ]
+  bearish_keywords = [
+      "drop",
+      "crash",
+      "hack",
+      "fall",
+      "ban",
+      "lawsuit",
+      "sec",
+      "delist",
+      "fraud",
+      "bear",
+      "plunge",
+      "outflow",
+      "dump",
+      "scam",
+      "investigation",
+      "breach",
+  ]
+
+  bull_score = sum(1 for w in bullish_keywords if w in text)
+  bear_score = sum(1 for w in bearish_keywords if w in text)
+
+  if bull_score > bear_score:
+    impact = "🟢 إيجابي / صعودي (Bullish Impact)"
+    explanation = (
+        "الخبر يعزز السيولة الشرائية ويدعم صعود الأسعار وزيادة إقبال"
+        " المتداولين."
+    )
+  elif bear_score > bull_score:
+    impact = "🔴 سلبي / هبوطي (Bearish Impact)"
+    explanation = (
+        "الخبر يولد ضغوطاً بيعية ومخاوف في السوق، مما قد يؤدي لتصحيح أو هبوط"
+        " سعري."
+    )
+  else:
+    impact = "⚪ محايد / استقراري (Neutral Impact)"
+    explanation = (
+        "الخبر ذو تأثير متوازن ويساعد على استقرار حركة التداول دون تقلبات عنيفة."
+    )
+
+  return impact, explanation
 
 
 def calculate_rsi(closes, period=14):
@@ -75,89 +117,85 @@ def calculate_rsi(closes, period=14):
 
 
 send_telegram(
-    "🚀 تم تفعيل رادار عبد الحكيم رائد المطور بنجاح!\n(أخبار عالمية بوقت"
-    " الصدور + صفقات عقود آجلة حية فقط 24/7)..."
+    "🌟 تم تفعيل رادار عبد الحكيم رائد المتكامل (أخبار عالمية + تحليل + عقود"
+    " آجلة) بنجاح!\nسيبدأ الآن البث الحي المتواصل كل 30 ثانية..."
 )
 
-seen_news_ids = set()
-news_index = 0
+EXCLUDED = ["USDCUSDT", "FDUSDUSDT", "TUSDUSDT", "BUSDUSDT", "EURUSDT"]
+news_idx = 0
 loop_count = 0
 
 while True:
   loop_count += 1
   now_str = datetime.utcnow().strftime("%H:%M:%S UTC")
 
-  # 1. جلب وبث الأخبار العالمية مع وقت الصدور بالدقيقة
+  # -------------------------------------------------------------
+  # 1. بث الأخبار العالمية مع التحليل اللحظي للمصدر والأثر
+  # -------------------------------------------------------------
   try:
     news_res = get_json(
         "https://min-api.cryptocompare.com/data/v2/news/?lang=EN"
     )
     if "Data" in news_res and len(news_res["Data"]) > 0:
-      item = news_res["Data"][news_index % len(news_res["Data"])]
-      news_id = item.get("id")
+      articles = news_res["Data"]
+      article = articles[news_idx % len(articles)]
 
-      if news_id not in seen_news_ids:
-        seen_news_ids.add(news_id)
-        source = item.get("source_info", {}).get("name", "Crypto News")
-        pub_time = datetime.fromtimestamp(item.get("published_on", 0)).strftime(
-            "%Y-%m-%d %H:%M:%S"
-        )
-        t_en = item.get("title", "")
-        b_en = item.get("body", "")[:120] + "..."
-        link = item.get("url", "")
+      source_name = article.get("source_info", {}).get("name", "Global Media")
+      title = article.get("title", "No Title")
+      body = article.get("body", "")[:180] + "..."
+      news_url = article.get("url", "")
+      pub_timestamp = article.get("published_on", time.time())
+      pub_date_str = datetime.utcfromtimestamp(pub_timestamp).strftime(
+          "%Y-%m-%d | %H:%M:%S UTC"
+      )
 
-        t_ar = translate_to_arabic(t_en)
-        b_ar = translate_to_arabic(b_en)
+      impact_tag, impact_desc = analyze_news_impact(title, body)
 
-        news_msg = (
-            "📰 خبر عالمي عاجل | رادار عبد الحكيم رائد\n"
-            "━━━━━━━━━━━━━━━━━━\n"
-            f"🌐 المصدر: {source}\n"
-            f"⏱ وقت صدور الخبر: {pub_time} (بتوقيت السيرفر)\n\n"
-            f"📌 العنوان: {t_ar}\n\n"
-            f"📝 التفاصيل: {b_ar}\n"
-            "━━━━━━━━━━━━━━━━━━\n"
-            f"🔗 المصدر الأصلي: {link}"
-        )
-        send_telegram(news_msg)
-        news_index += 1
+      news_card = (
+          "📰 رادار الأخبار العالمية والتحليل | عبد الحكيم رائد\n"
+          "━━━━━━━━━━━━━━━━━━━━━\n"
+          f"🌐 منصة المصدر: {source_name} (اللغة الأصلية للموقع: English)\n"
+          f"⏱ تاريخ ووقت النشر الرسمي: {pub_date_str}\n\n"
+          "📌 عنوان الخبر الأصلي:\n"
+          f"{title}\n\n"
+          "📝 ملخص وتفاصيل الخبر:\n"
+          f"{body}\n\n"
+          "🧠 التحليل الفني وتأثير الخبر على السوق:\n"
+          f"• التقييم: {impact_tag}\n"
+          f"• التفسير: {impact_desc}\n"
+          "━━━━━━━━━━━━━━━━━━━━━\n"
+          f"🔗 رابط المقال الأصلي والمصدر: {news_url}"
+      )
+
+      send_telegram(news_card)
+      news_idx += 1
   except Exception as e:
-    print(f"News error: {e}")
+    print("News processing error:", e)
 
   time.sleep(15)
 
-  # 2. فحص صفقات العقود الآجلة الحية على بينانس
+  # -------------------------------------------------------------
+  # 2. فحص العقود الآجلة اللحظي ورصد صفقات الشورت
+  # -------------------------------------------------------------
   try:
-    tickers = []
-    endpoints = [
-        "https://data-api.binance.vision/api/v3/ticker/24hr",
-        "https://api.binance.com/api/v3/ticker/24hr",
-    ]
-    for ep in endpoints:
-      try:
-        data = get_json(ep)
-        if isinstance(data, list) and len(data) > 0:
-          # فلترة العملات النشطة فقط واستبعاد القائمة السوداء
-          tickers = [
-              t
-              for t in data
-              if t.get("symbol", "").endswith("USDT")
-              and t.get("symbol") not in BLACKLIST
-              and float(t.get("quoteVolume", 0)) > 2000000
-          ]  # سيولة فوق 2 مليون دولار
-          if len(tickers) > 0:
-            break
-      except Exception:
-        continue
+    data = get_json("https://data-api.binance.vision/api/v3/ticker/24hr")
+    if isinstance(data, list) and len(data) > 0:
+      futures_tickers = [
+          t
+          for t in data
+          if t.get("symbol", "").endswith("USDT")
+          and t.get("symbol") not in EXCLUDED
+      ]
 
-    if len(tickers) > 0:
       by_change = sorted(
-          tickers,
+          futures_tickers,
           key=lambda x: float(x.get("priceChangePercent", 0)),
           reverse=True,
       )
       by_volume = sorted(
-          tickers, key=lambda x: float(x.get("quoteVolume", 0)), reverse=True
+          futures_tickers,
+          key=lambda x: float(x.get("quoteVolume", 0)),
+          reverse=True,
       )
 
       g = by_change[0]
@@ -174,20 +212,20 @@ while True:
       )
       v_info = f"#{v['symbol']} ({float(v['quoteVolume'])/1000000:.1f} مليون $)"
 
-      market_msg = (
-          "📊 رادار عبد الحكيم رائد | نبض السوق اللحظي\n"
-          "━━━━━━━━━━━━━━━━━━\n"
-          f"⏱ التوقيت: {now_str} (تحديث #{loop_count})\n\n"
-          f"🔥 أعلى عملة صاعدة: {g_info}\n\n"
-          f"📉 أكبر عملة هابطة: {l_info}\n\n"
-          f"💰 أعلى سيولة متداولة: {v_info}\n"
-          "━━━━━━━━━━━━━━━━━━\n"
-          "🔍 فحص مستمر لرصد صفقات الشورت عالية الدقة..."
+      market_card = (
+          "📊 رادار نبض العقود الآجلة | عبد الحكيم رائد\n"
+          "━━━━━━━━━━━━━━━━━━━━━\n"
+          f"⏱ التوقيت: {now_str} (دورة #{loop_count})\n\n"
+          f"🔥 أعلى عملة عقود صاعدة: {g_info}\n"
+          f"📉 أكبر عملة عقود هابطة: {l_info}\n"
+          f"💰 أعلى سيولة عقود آجلة: {v_info}\n"
+          "━━━━━━━━━━━━━━━━━━━━━\n"
+          "🔍 حالة الرادار: مسح مباشر لجميع الصفقات والفرص..."
       )
-      send_telegram(market_msg)
+      send_telegram(market_card)
 
-      # رصد صفقات الشورت عالية الدقة
-      for t in by_change[:8]:
+      # فحص إشارات الشورت
+      for t in by_change[:6]:
         sym = t["symbol"]
         change = float(t.get("priceChangePercent", 0))
         if change >= 5.0:
@@ -214,38 +252,35 @@ while True:
             body = abs(last_c - last_o)
             wick = last_h - max(last_o, last_c)
 
-            # شروط الصفقة عالية الاحتمالية
             if pump >= 5.0 and v_spike >= 1.3 and rsi_val >= 68:
               if wick > (body * 0.3) or (last_c < last_h * 0.985):
                 sl = round(last_h * 1.015, 4)
                 tp1 = round(last_c - (last_h - past_c) * 0.382, 4)
                 tp2 = round(last_c - (last_h - past_c) * 0.50, 4)
 
-                sig_msg = (
-                    "🚨 إشارة شورت عالية الدقة (High Probability) 🚨\n"
-                    "👑 منظومة عبد الحكيم رائد للتحليل\n"
-                    "━━━━━━━━━━━━━━━━━━\n"
-                    f"📌 العملة: {sym} (متاحة في بينانس)\n"
+                sig_card = (
+                    "🚨 إشارة شورت مؤكدة (Signal Alert) 🚨\n"
+                    "👑 منظومة عبد الحكيم رائد للتحليل الكمي\n"
+                    "━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"📌 العملة: {sym}\n"
                     f"📈 نسبة الصعود: +{pump:.1f}%\n"
                     f"📊 مؤشر RSI: {rsi_val:.1f}\n"
                     f"🌊 تدفق الفوليوم: {v_spike:.1f}x ضعف المعدل\n"
-                    "━━━━━━━━━━━━━━━━━━\n"
+                    "━━━━━━━━━━━━━━━━━━━━━\n"
                     f"💰 سعر الدخول المقترح: {last_c}\n"
-                    f"🛑 وقف الخسارة (SL): {sl}\n"
-                    f"🎯 الهدف الأول: {tp1}\n"
-                    f"🎯 الهدف الثاني: {tp2}\n"
-                    "━━━━━━━━━━━━━━━━━━\n"
-                    "💡 نصيحة عبد الحكيم: افتح صفقة Short برافعة 3x-5x"
-                    " ومخاطرة 1-2% فقط، وحرك الوقف للدخول عند ملامسة الهدف"
-                    " الأول."
+                    f"🛑 وقف الخسارة الصارم (SL): {sl}\n"
+                    f"🎯 الهدف الأول (TP1): {tp1}\n"
+                    f"🎯 الهدف الثاني (TP2): {tp2}\n"
+                    "━━━━━━━━━━━━━━━━━━━━━\n"
+                    "💡 نصيحة عبد الحكيم الاستراتيجية: ادخل بـ 1-2% فقط مع"
+                    " رافعة 3x-5x وحرك الوقف لنقطة الدخول عند الهدف الأول."
                 )
-                send_telegram(sig_msg)
-                time.sleep(2)
+                send_telegram(sig_card)
                 break
           except Exception:
             continue
   except Exception as e:
-    print(f"Market error: {e}")
+    print("Market error:", e)
 
   time.sleep(15)
-  
+        
