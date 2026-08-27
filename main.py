@@ -15,16 +15,21 @@ def send_telegram(text):
   )
   try:
     with urllib.request.urlopen(req, timeout=15) as r:
-      print("Message sent to Telegram")
+      print("Delivered to Telegram")
   except Exception as e:
     print("Telegram Error:", e)
 
 
 def get_json(url):
   req = urllib.request.Request(
-      url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+      url,
+      headers={
+          "User-Agent": (
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+          )
+      },
   )
-  with urllib.request.urlopen(req, timeout=15) as r:
+  with urllib.request.urlopen(req, timeout=10) as r:
     return json.loads(r.read().decode("utf-8"))
 
 
@@ -45,8 +50,8 @@ def calculate_rsi(closes, period=14):
 
 
 send_telegram(
-    "🔥 تم تفعيل رادار عبد الحكيم رائد اللحظي بنجاح!\nسيبدأ الآن إرسال نبضات"
-    " السوق والصفقات كل 30 ثانية بدون أي توقف..."
+    "🔥 تم تفعيل رادار عبد الحكيم رائد اللحظي بنجاح!\nسيبدأ الآن بث التقرير"
+    " اللحظي وفحص الصفقات كل 30 ثانية..."
 )
 
 loop_count = 0
@@ -55,57 +60,78 @@ while loop_count < 300:
   loop_count += 1
   now_str = datetime.utcnow().strftime("%H:%M:%S UTC")
 
-  try:
-    # جلب جميع بيانات عقود بينانس الآجلة اللحظية
-    tickers = get_json("https://fapi.binance.com/fapi/v1/ticker/24hr")
-    usdt_tickers = [t for t in tickers if t["symbol"].endswith("USDT")]
+  top_gainer_info = "جاري التحديث..."
+  top_loser_info = "جاري التحديث..."
+  top_vol_info = "جاري التحديث..."
+  tickers = []
 
-    # ترتيب العملات حسب نسبة التغير والسيولة
-    by_change = sorted(
-        usdt_tickers, key=lambda x: float(x["priceChangePercent"]), reverse=True
-    )
-    by_volume = sorted(
-        usdt_tickers, key=lambda x: float(x["quoteVolume"]), reverse=True
-    )
+  # جلب بيانات السوق مع روابط بديلة لضمان عدم الحظر
+  endpoints = [
+      "https://data-api.binance.vision/api/v3/ticker/24hr",
+      "https://api.binance.com/api/v3/ticker/24hr",
+      "https://fapi.binance.com/fapi/v1/ticker/24hr",
+  ]
+  for ep in endpoints:
+    try:
+      data = get_json(ep)
+      if isinstance(data, list) and len(data) > 0:
+        tickers = [t for t in data if t.get("symbol", "").endswith("USDT")]
+        if len(tickers) > 0:
+          break
+    except Exception:
+      continue
 
-    top_gainer = by_change[0]
-    top_loser = by_change[-1]
-    top_volume = by_volume[0]
+  if len(tickers) > 0:
+    try:
+      by_change = sorted(
+          tickers,
+          key=lambda x: float(x.get("priceChangePercent", 0)),
+          reverse=True,
+      )
+      by_volume = sorted(
+          tickers, key=lambda x: float(x.get("quoteVolume", 0)), reverse=True
+      )
 
-    g_sym = top_gainer["symbol"]
-    g_change = float(top_gainer["priceChangePercent"])
-    g_price = float(top_gainer["lastPrice"])
+      g = by_change[0]
+      l = by_change[-1]
+      v = by_volume[0]
 
-    l_sym = top_loser["symbol"]
-    l_change = float(top_loser["priceChangePercent"])
-    l_price = float(top_loser["lastPrice"])
+      top_gainer_info = (
+          f"#{g['symbol']} (+{float(g['priceChangePercent']):.2f}%) | السعر:"
+          f" {g['lastPrice']}"
+      )
+      top_loser_info = (
+          f"#{l['symbol']} ({float(l['priceChangePercent']):.2f}%) | السعر:"
+          f" {l['lastPrice']}"
+      )
+      top_vol_info = (
+          f"#{v['symbol']} ({float(v['quoteVolume'])/1000000:.1f} مليون $)"
+      )
+    except Exception as e:
+      print("Sort error:", e)
 
-    v_sym = top_volume["symbol"]
-    v_vol = float(top_volume["quoteVolume"]) / 1000000  # تحويل للمليون دولار
+  # إرسال التقرير اللحظي كل 30 ثانية
+  market_msg = (
+      "📊 رادار عبد الحكيم رائد | التقرير اللحظي للسوق\n"
+      "━━━━━━━━━━━━━━━━━━\n"
+      f"⏱ التوقيت: {now_str} (تحديث #{loop_count})\n\n"
+      f"🔥 أعلى عملة صاعدة: {top_gainer_info}\n\n"
+      f"📉 أكبر عملة هابطة: {top_loser_info}\n\n"
+      f"💰 أعلى سيولة بالسوق: {top_vol_info}\n"
+      "━━━━━━━━━━━━━━━━━━\n"
+      "🔍 حالة الرادار: مسح مباشر لجميع الصفقات والفرص..."
+  )
+  send_telegram(market_msg)
 
-    # رسالة النبض اللحظي لكل 30 ثانية
-    market_msg = (
-        "📊 رادار عبد الحكيم رائد | التقرير اللحظي للسوق\n"
-        "━━━━━━━━━━━━━━━━━━\n"
-        f"⏱ التوقيت: {now_str} (دورة #{loop_count})\n\n"
-        f"🔥 أعلى عملة صاعدة: #{g_sym}\n"
-        f"📈 نسبة الصعود: +{g_change:.2f}% | السعر: {g_price}\n\n"
-        f"📉 أكبر عملة هابطة: #{l_sym}\n"
-        f"🔻 نسبة الهبوط: {l_change:.2f}% | السعر: {l_price}\n\n"
-        f"💰 أعلى سيولة بالسوق: #{v_sym} ({v_vol:.1f} مليون $)\n"
-        "━━━━━━━━━━━━━━━━━━\n"
-        "🔍 الرادار يفحص الآن كل العملات لرصد صفقات الشورت..."
-    )
-    send_telegram(market_msg)
-
-    # فحص صفقات الشورت الفنية
-    for t in by_change[:15]:
+  # فحص صفقات الشورت
+  if len(tickers) > 0:
+    for t in by_change[:10]:
       sym = t["symbol"]
-      change = float(t["priceChangePercent"])
+      change = float(t.get("priceChangePercent", 0))
       if change >= 5.0:
         try:
           klines = get_json(
-              "https://fapi.binance.com/fapi/v1/klines?symbol="
+              "https://data-api.binance.vision/api/v3/klines?symbol="
               + sym
               + "&interval=15m&limit=50"
           )
@@ -114,13 +140,13 @@ while loop_count < 300:
           opens = [float(k[1]) for k in klines]
           highs = [float(k[2]) for k in klines]
           closes = [float(k[4]) for k in klines]
-          vols = [float(k[5]) for k in klines]
+          volumes = [float(k[5]) for k in klines]
 
           last_o, last_h, last_c = opens[-1], highs[-1], closes[-1]
           last_v = vols[-1]
           past_c = closes[-8]
           pump = ((last_h - past_c) / past_c) * 100
-          avg_v = sum(vols[-20:-1]) / 19
+          avg_v = sum(volumes[-20:-1]) / 19
           v_spike = last_v / avg_v if avg_v > 0 else 1
           rsi_val = calculate_rsi(closes)
           body = abs(last_c - last_o)
@@ -148,9 +174,6 @@ while loop_count < 300:
               break
         except Exception:
           continue
-
-  except Exception as e:
-    print("Market Scan Error:", e)
 
   time.sleep(30)
   
