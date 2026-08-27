@@ -1,44 +1,53 @@
-name: 24/7 Cloud Trading Bot
+name: 24/7 Cloud Trading Radar - Abed Alhakim
 
 on:
   schedule:
-    - cron: '*/5 * * * *' # تشغيل سحابي كل 5 دقائق
-  workflow_dispatch:      # تشغيل يدوي
+    - cron: '*/5 * * * *' # تشغيل دوري سحابي كل 5 دقائق
+  workflow_dispatch:      # تشغيل فوري في أي وقت
 
 jobs:
   run-scanner:
     runs-on: ubuntu-latest
     steps:
-      - name: تحميل الكود
-        uses: actions/checkout@v3
+      - name: تحميل أحدث إصدار
+        uses: actions/checkout@v4
 
-      - name: تثبيت بايثون
-        uses: actions/setup-python@v4
+      - name: تثبيت بايثون 3.11
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
 
-      - name: تشغيل فاحص السوق السحابي
+      - name: تشغيل رادار عبد الحكيم رائد
         run: |
           python -c "
           import urllib.request, json, time
+          from datetime import datetime
 
           BOT_TOKEN = '8641484254:AAGs6MFyxo52A_Y2bkznogpZ9-s9g6NbjXk'
           CHAT_ID = '8493446835'
 
           def send_telegram(text):
               url = f'https://api.telegram.org/bot{BOT_TOKEN}/sendMessage'
-              data = json.dumps({'chat_id': CHAT_ID, 'text': text}).encode('utf-8')
+              data = json.dumps({'chat_id': CHAT_ID, 'text': text, 'parse_mode': 'Markdown'}).encode('utf-8')
               req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
               try:
-                  with urllib.request.urlopen(req, timeout=10) as r: print('Telegram Sent')
-              except Exception as e: print('Error:', e)
-
-          # إرسال رسالة تجريبية للتأكيد الفوري
-          send_telegram('🔔 فحص سحابي نشط: سيرفر GitHub يعمل الآن بنجاح 24/7 ويفحص صفقات بينانس...')
+                  with urllib.request.urlopen(req, timeout=10) as r: pass
+              except Exception as e:
+                  print('Telegram Error:', e)
 
           def get_json(url):
               req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-              with urllib.request.urlopen(req, timeout=10) as r: return json.loads(r.read().decode('utf-8'))
+              with urllib.request.urlopen(req, timeout=10) as r:
+                  return json.loads(r.read().decode('utf-8'))
+
+          def get_market_sentiment():
+              try:
+                  data = get_json('https://api.alternative.me/fng/?limit=1')
+                  val = data['data'][0]['value']
+                  classification = data['data'][0]['value_classification']
+                  return val, classification
+              except Exception:
+                  return '50', 'Neutral'
 
           def calculate_rsi(closes, period=14):
               if len(closes) < period + 1: return 50
@@ -52,6 +61,20 @@ jobs:
                   avg_loss = (avg_loss * (period - 1) + losses[i]) / period
               if avg_loss == 0: return 100
               return 100 - (100 / (1 + (avg_gain / avg_loss)))
+
+          # رسالة نبض الفحص اللحظي
+          fng_val, fng_class = get_market_sentiment()
+          now_time = datetime.utcnow().strftime('%H:%M:%S UTC')
+          
+          heartbeat_msg = (
+              f'📡 *رادار عبد الحكيم رائد الفني | الفحص السحابي نشط*\n'
+              f'━━━━━━━━━━━━━━━━━━\n'
+              f'⏱ *توقيت الفحص:* `{now_time}`\n'
+              f'🧠 *معنويات السوق (Fear & Greed):* `{fng_class} ({fng_val}/100)`\n'
+              f'🔍 *الحالة:* جاري المسح الشامل لجميع عقود بينانس الآجلة ورصد صفقات الشورت...\n'
+              f'☁️ *السيرفر السحابي:* متصل 24/7 ومستقل عن هاتفك'
+          )
+          send_telegram(heartbeat_msg)
 
           # فحص عملات بينانس
           try:
@@ -75,14 +98,40 @@ jobs:
                           vol_spike = last_volume / avg_vol if avg_vol > 0 else 1
                           rsi = calculate_rsi(closes)
 
+                          candle_body = abs(last_close - last_open)
+                          upper_wick = last_high - max(last_open, last_close)
+
+                          # معايير رصد قمة الانعكاس
                           if pump_pct >= 5.0 and vol_spike >= 1.4 and rsi >= 70:
-                              stop_loss = round(last_high * 1.015, 5)
-                              target_1 = round(last_close - (last_high - past_price) * 0.382, 5)
-                              target_2 = round(last_close - (last_high - past_price) * 0.50, 5)
-                              msg = f'🚨 فرصة شورت سحابية\n\nالعملة: {symbol}\nنسبة الصعود: +{pump_pct:.1f}%\nRSI: {rsi:.1f}\nسعر الدخول: {last_close}\nوقف الخسارة: {stop_loss}\nالهدف 1: {target_1}\nالهدف 2: {target_2}'
-                              send_telegram(msg)
-                              time.sleep(2)
-                      except Exception: continue
-          except Exception as e: print('Scan error:', e)
+                              if upper_wick > (candle_body * 0.4) or (last_close < last_high * 0.985):
+                                  stop_loss = round(last_high * 1.015, 5)
+                                  target_1 = round(last_close - (last_high - past_price) * 0.382, 5)
+                                  target_2 = round(last_close - (last_high - past_price) * 0.50, 5)
+
+                                  signal_msg = (
+                                      f'🚨 *فرصة شورت استثنائية (Short Signal)* 🚨\n'
+                                      f'👑 *منظومة عبد الحكيم رائد للتحليل الكمي*\n'
+                                      f'━━━━━━━━━━━━━━━━━━\n'
+                                      f'📌 *العملة:* `#{symbol}`\n'
+                                      f'📈 *نسبة الصعود الخاطف:* `+{pump_pct:.1f}%`\n'
+                                      f'📊 *مؤشر RSI (تشبع قمة):* `{rsi:.1f}`\n'
+                                      f'🌊 *تدفق الفوليوم:* `{vol_spike:.1f}x ضعف المعدل`\n'
+                                      f'━━━━━━━━━━━━━━━━━━\n'
+                                      f'💰 *سعر الدخول المقترح:* `{last_close}`\n'
+                                      f'🛑 *وقف الخسارة الصارم (SL):* `{stop_loss}`\n'
+                                      f'🎯 *الهدف الأول (TP1):* `{target_1}`\n'
+                                      f'🎯 *الهدف الثاني (TP2):* `{target_2}`\n'
+                                      f'━━━━━━━━━━━━━━━━━━\n'
+                                      f'💡 *نصيحة عبد الحكيم الاستراتيجية:*\n'
+                                      f'• التزم بإدارة رأس مال حكيمة (مخاطرة 1% إلى 2% كحد أقصى).\n'
+                                      f'• استخدم رافعة مالية معتدلة (3x - 5x).\n'
+                                      f'• فور تحقيق الهدف الأول، حرّك وقف الخسارة إلى نقطة الدخول لتأمين ربحك.'
+                                  )
+                                  send_telegram(signal_msg)
+                                  time.sleep(2)
+                      except Exception:
+                          continue
+          except Exception as e:
+              print('Scan error:', e)
           "
           
