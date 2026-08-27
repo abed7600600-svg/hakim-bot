@@ -3,6 +3,9 @@ import json
 import time
 import urllib.request
 
+# ==========================================
+# بيانات بوت عبد الحكيم رائد
+# ==========================================
 BOT_TOKEN = "8641484254:AAGs6MFyxo52A_Y2bkznogpZ9-s9g6NbjXk"
 CHAT_ID = "8493446835"
 
@@ -15,7 +18,7 @@ def send_telegram(text):
   )
   try:
     with urllib.request.urlopen(req, timeout=15) as r:
-      print("Delivered to Telegram")
+      print("Message sent to Telegram")
   except Exception as e:
     print("Telegram Error:", e)
 
@@ -50,11 +53,12 @@ def calculate_rsi(closes, period=14):
 
 
 send_telegram(
-    "🔥 تم تفعيل رادار عبد الحكيم رائد اللحظي بنجاح!\nسيبدأ الآن بث التقرير"
-    " اللحظي وفحص الصفقات كل 30 ثانية..."
+    "🎯 تم تفعيل رادار العقود الآجلة الحصري بنجاح!\n(Binance Futures"
+    " USDT-M)\nجاري الآن فحص العملات المتاحة للتداول الفعلي في قسم العقود..."
 )
 
 loop_count = 0
+EXCLUDED_SYMBOLS = ["USDCUSDT", "FDUSDUSDT", "TUSDUSDT", "BUSDUSDT", "EURUSDT"]
 
 while loop_count < 300:
   loop_count += 1
@@ -63,33 +67,32 @@ while loop_count < 300:
   top_gainer_info = "جاري التحديث..."
   top_loser_info = "جاري التحديث..."
   top_vol_info = "جاري التحديث..."
-  tickers = []
+  futures_tickers = []
 
-  # جلب بيانات السوق مع روابط بديلة لضمان عدم الحظر
-  endpoints = [
-      "https://data-api.binance.vision/api/v3/ticker/24hr",
-      "https://api.binance.com/api/v3/ticker/24hr",
-      "https://fapi.binance.com/fapi/v1/ticker/24hr",
-  ]
-  for ep in endpoints:
-    try:
-      data = get_json(ep)
-      if isinstance(data, list) and len(data) > 0:
-        tickers = [t for t in data if t.get("symbol", "").endswith("USDT")]
-        if len(tickers) > 0:
-          break
-    except Exception:
-      continue
+  # جلب بيانات العقود الآجلة الحية فقط
+  try:
+    data = get_json("https://fapi.binance.com/fapi/v1/ticker/24hr")
+    if isinstance(data, list) and len(data) > 0:
+      futures_tickers = [
+          t
+          for t in data
+          if t.get("symbol", "").endswith("USDT")
+          and t.get("symbol") not in EXCLUDED_SYMBOLS
+      ]
+  except Exception as e:
+    print("Futures Fetch Error:", e)
 
-  if len(tickers) > 0:
+  if len(futures_tickers) > 0:
     try:
       by_change = sorted(
-          tickers,
+          futures_tickers,
           key=lambda x: float(x.get("priceChangePercent", 0)),
           reverse=True,
       )
       by_volume = sorted(
-          tickers, key=lambda x: float(x.get("quoteVolume", 0)), reverse=True
+          futures_tickers,
+          key=lambda x: float(x.get("quoteVolume", 0)),
+          reverse=True,
       )
 
       g = by_change[0]
@@ -110,28 +113,28 @@ while loop_count < 300:
     except Exception as e:
       print("Sort error:", e)
 
-  # إرسال التقرير اللحظي كل 30 ثانية
+  # إرسال التقرير اللحظي للعقود الآجلة
   market_msg = (
-      "📊 رادار عبد الحكيم رائد | التقرير اللحظي للسوق\n"
+      "📊 رادار عبد الحكيم رائد | العقود الآجلة اللحظي (Futures)\n"
       "━━━━━━━━━━━━━━━━━━\n"
       f"⏱ التوقيت: {now_str} (تحديث #{loop_count})\n\n"
-      f"🔥 أعلى عملة صاعدة: {top_gainer_info}\n\n"
-      f"📉 أكبر عملة هابطة: {top_loser_info}\n\n"
-      f"💰 أعلى سيولة بالسوق: {top_vol_info}\n"
+      f"🔥 أعلى عملة عقود آجلة صاعدة: {top_gainer_info}\n\n"
+      f"📉 أكبر عملة عقود آجلة هابطة: {top_loser_info}\n\n"
+      f"💰 أعلى سيولة عقود آجلة: {top_vol_info}\n"
       "━━━━━━━━━━━━━━━━━━\n"
-      "🔍 حالة الرادار: مسح مباشر لجميع الصفقات والفرص..."
+      "🔍 جاري فحص صفقات الشورت لجميع عقود بينانس..."
   )
   send_telegram(market_msg)
 
-  # فحص صفقات الشورت
-  if len(tickers) > 0:
-    for t in by_change[:10]:
+  # فحص صفقات الشورت على العقود الآجلة
+  if len(futures_tickers) > 0:
+    for t in by_change[:12]:
       sym = t["symbol"]
       change = float(t.get("priceChangePercent", 0))
       if change >= 5.0:
         try:
           klines = get_json(
-              "https://data-api.binance.vision/api/v3/klines?symbol="
+              "https://fapi.binance.com/fapi/v1/klines?symbol="
               + sym
               + "&interval=15m&limit=50"
           )
@@ -159,15 +162,15 @@ while loop_count < 300:
               tp2 = round(last_c - (last_h - past_c) * 0.50, 4)
 
               sig_msg = (
-                  "🚨 إشارة شورت مؤكدة (Signal Alert) 🚨\n👑 منظومة عبد الحكيم"
-                  f" رائد للتحليل\n━━━━━━━━━━━━━━━━━━\n📌 العملة:"
+                  "🚨 إشارة شورت في العقود الآجلة (Futures Alert) 🚨\n👑 منظومة"
+                  f" عبد الحكيم رائد للتحليل\n━━━━━━━━━━━━━━━━━━\n📌 العملة:"
                   f" {sym}\n📈 نسبة الصعود: +{pump:.1f}%\n📊 مؤشر RSI:"
                   f" {rsi_val:.1f}\n🌊 تدفق الفوليوم: {v_spike:.1f}x ضعف"
                   " المعدل\n━━━━━━━━━━━━━━━━━━\n💰 سعر الدخول المقترح:"
                   f" {last_c}\n🛑 وقف الخسارة (SL): {sl}\n🎯 الهدف الأول:"
                   f" {tp1}\n🎯 الهدف الثاني: {tp2}\n━━━━━━━━━━━━━━━━━━\n💡"
-                  " نصيحة عبد الحكيم: الدخول بـ 1-2% فقط مع رافعة 3x-5x وتأمين"
-                  " الصفقة عند الهدف الأول."
+                  " نصيحة عبد الحكيم: افتح صفقة Short في قسم العقود الآجلة"
+                  " برافعة 3x-5x ومخاطرة 1-2% فقط."
               )
               send_telegram(sig_msg)
               time.sleep(2)
