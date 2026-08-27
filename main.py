@@ -1,6 +1,6 @@
+from datetime import datetime
 import json
 import time
-import urllib.parse
 import urllib.request
 
 BOT_TOKEN = "8641484254:AAGs6MFyxo52A_Y2bkznogpZ9-s9g6NbjXk"
@@ -15,7 +15,7 @@ def send_telegram(text):
   )
   try:
     with urllib.request.urlopen(req, timeout=15) as r:
-      print("Sent to Telegram successfully")
+      print("Message sent to Telegram")
   except Exception as e:
     print("Telegram Error:", e)
 
@@ -26,19 +26,6 @@ def get_json(url):
   )
   with urllib.request.urlopen(req, timeout=15) as r:
     return json.loads(r.read().decode("utf-8"))
-
-
-def translate_to_ar(text):
-  try:
-    q = urllib.parse.quote(text[:250])
-    url = (
-        "https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=ar&dt=t&q="
-        + q
-    )
-    res = get_json(url)
-    return "".join([i[0] for i in res[0] if i[0]])
-  except Exception:
-    return text
 
 
 def calculate_rsi(closes, period=14):
@@ -57,52 +44,65 @@ def calculate_rsi(closes, period=14):
   return 100 - (100 / (1 + (avg_gain / avg_loss)))
 
 
-# رسالة فورية للتأكيد عند بدء التشغيل
 send_telegram(
-    "🔥 تم تشغيل منظومة عبد الحكيم رائد السحابية بنجاح!\nجاري الآن بث الأخبار"
-    " وفحص صفقات السوق كل 30 ثانية..."
+    "🔥 تم تفعيل رادار عبد الحكيم رائد اللحظي بنجاح!\nسيبدأ الآن إرسال نبضات"
+    " السوق والصفقات كل 30 ثانية بدون أي توقف..."
 )
 
-news_idx = 0
 loop_count = 0
 
 while loop_count < 300:
   loop_count += 1
-  print(f"Cycle {loop_count} running...")
+  now_str = datetime.utcnow().strftime("%H:%M:%S UTC")
 
-  # 1. جلب وبث الأخبار العالمية المترجمة
   try:
-    news_data = get_json(
-        "https://min-api.cryptocompare.com/data/v2/news/?lang=EN"
-    )
-    if "Data" in news_data and len(news_data["Data"]) > 0:
-      item = news_data["Data"][news_idx % len(news_data["Data"])]
-      source = item.get("source_info", {}).get("name", "Crypto News")
-      t_en = item.get("title", "")
-      b_en = item.get("body", "")[:130] + "..."
-      link = item.get("url", "")
-
-      t_ar = translate_to_ar(t_en)
-      b_ar = translate_to_ar(b_en)
-
-      msg = (
-          "📰 خبر عاجل | رادار عبد الحكيم رائد\n━━━━━━━━━━━━━━━━━━\n🌐 المصدر:"
-          f" {source}\n\n📌 العنوان: {t_ar}\n\n📝 التفاصيل:"
-          f" {b_ar}\n━━━━━━━━━━━━━━━━━━\n🔗 الرابط: {link}"
-      )
-      send_telegram(msg)
-      news_idx += 1
-  except Exception as e:
-    print("News error:", e)
-
-  time.sleep(15)
-
-  # 2. فحص صفقات بينانس
-  try:
+    # جلب جميع بيانات عقود بينانس الآجلة اللحظية
     tickers = get_json("https://fapi.binance.com/fapi/v1/ticker/24hr")
-    for t in tickers:
-      sym = t.get("symbol", "")
-      if sym.endswith("USDT") and float(t.get("priceChangePercent", 0)) >= 5.0:
+    usdt_tickers = [t for t in tickers if t["symbol"].endswith("USDT")]
+
+    # ترتيب العملات حسب نسبة التغير والسيولة
+    by_change = sorted(
+        usdt_tickers, key=lambda x: float(x["priceChangePercent"]), reverse=True
+    )
+    by_volume = sorted(
+        usdt_tickers, key=lambda x: float(x["quoteVolume"]), reverse=True
+    )
+
+    top_gainer = by_change[0]
+    top_loser = by_change[-1]
+    top_volume = by_volume[0]
+
+    g_sym = top_gainer["symbol"]
+    g_change = float(top_gainer["priceChangePercent"])
+    g_price = float(top_gainer["lastPrice"])
+
+    l_sym = top_loser["symbol"]
+    l_change = float(top_loser["priceChangePercent"])
+    l_price = float(top_loser["lastPrice"])
+
+    v_sym = top_volume["symbol"]
+    v_vol = float(top_volume["quoteVolume"]) / 1000000  # تحويل للمليون دولار
+
+    # رسالة النبض اللحظي لكل 30 ثانية
+    market_msg = (
+        "📊 رادار عبد الحكيم رائد | التقرير اللحظي للسوق\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"⏱ التوقيت: {now_str} (دورة #{loop_count})\n\n"
+        f"🔥 أعلى عملة صاعدة: #{g_sym}\n"
+        f"📈 نسبة الصعود: +{g_change:.2f}% | السعر: {g_price}\n\n"
+        f"📉 أكبر عملة هابطة: #{l_sym}\n"
+        f"🔻 نسبة الهبوط: {l_change:.2f}% | السعر: {l_price}\n\n"
+        f"💰 أعلى سيولة بالسوق: #{v_sym} ({v_vol:.1f} مليون $)\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "🔍 الرادار يفحص الآن كل العملات لرصد صفقات الشورت..."
+    )
+    send_telegram(market_msg)
+
+    # فحص صفقات الشورت الفنية
+    for t in by_change[:15]:
+      sym = t["symbol"]
+      change = float(t["priceChangePercent"])
+      if change >= 5.0:
         try:
           klines = get_json(
               "https://fapi.binance.com/fapi/v1/klines?symbol="
@@ -133,7 +133,7 @@ while loop_count < 300:
               tp2 = round(last_c - (last_h - past_c) * 0.50, 4)
 
               sig_msg = (
-                  "🚨 فرصة شورت مؤكدة (Signal Alert) 🚨\n👑 منظومة عبد الحكيم"
+                  "🚨 إشارة شورت مؤكدة (Signal Alert) 🚨\n👑 منظومة عبد الحكيم"
                   f" رائد للتحليل\n━━━━━━━━━━━━━━━━━━\n📌 العملة:"
                   f" {sym}\n📈 نسبة الصعود: +{pump:.1f}%\n📊 مؤشر RSI:"
                   f" {rsi_val:.1f}\n🌊 تدفق الفوليوم: {v_spike:.1f}x ضعف"
@@ -148,8 +148,9 @@ while loop_count < 300:
               break
         except Exception:
           continue
-  except Exception as e:
-    print("Scan error:", e)
 
-  time.sleep(15)
+  except Exception as e:
+    print("Market Scan Error:", e)
+
+  time.sleep(30)
   
