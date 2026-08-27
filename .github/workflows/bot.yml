@@ -2,8 +2,8 @@ name: 24/7 Cloud Trading Bot
 
 on:
   schedule:
-    - cron: '*/5 * * * *' # تشغيل تلقائي كل 5 دقائق في السحابة
-  workflow_dispatch:      # تشغيل يدوي فوري
+    - cron: '*/5 * * * *' # تشغيل سحابي كل 5 دقائق
+  workflow_dispatch:      # تشغيل يدوي
 
 jobs:
   run-scanner:
@@ -17,7 +17,7 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: تشغيل فاحص السوق
+      - name: تشغيل فاحص السوق السحابي
         run: |
           python -c "
           import urllib.request, json, time
@@ -30,8 +30,11 @@ jobs:
               data = json.dumps({'chat_id': CHAT_ID, 'text': text}).encode('utf-8')
               req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
               try:
-                  with urllib.request.urlopen(req, timeout=10) as r: pass
+                  with urllib.request.urlopen(req, timeout=10) as r: print('Telegram Sent')
               except Exception as e: print('Error:', e)
+
+          # إرسال رسالة تجريبية للتأكيد الفوري
+          send_telegram('🔔 فحص سحابي نشط: سيرفر GitHub يعمل الآن بنجاح 24/7 ويفحص صفقات بينانس...')
 
           def get_json(url):
               req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
@@ -76,7 +79,7 @@ jobs:
                               stop_loss = round(last_high * 1.015, 5)
                               target_1 = round(last_close - (last_high - past_price) * 0.382, 5)
                               target_2 = round(last_close - (last_high - past_price) * 0.50, 5)
-                              msg = f'🚨 فرصة شورت سحابية (GitHub Actions)\n\nالعملة: {symbol}\nنسبة الصعود: +{pump_pct:.1f}%\nRSI: {rsi:.1f}\nسعر الدخول: {last_close}\nوقف الخسارة: {stop_loss}\nالهدف الأول: {target_1}\nالهدف الثاني: {target_2}'
+                              msg = f'🚨 فرصة شورت سحابية\n\nالعملة: {symbol}\nنسبة الصعود: +{pump_pct:.1f}%\nRSI: {rsi:.1f}\nسعر الدخول: {last_close}\nوقف الخسارة: {stop_loss}\nالهدف 1: {target_1}\nالهدف 2: {target_2}'
                               send_telegram(msg)
                               time.sleep(2)
                       except Exception: continue
