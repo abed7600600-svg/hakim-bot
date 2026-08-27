@@ -1,0 +1,134 @@
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import json
+import threading
+import time
+import urllib.request
+
+# ==========================================
+# بيانات بوت حكيم رائد الغفاري
+# ==========================================
+BOT_TOKEN = "8641484254:AAGs6MFyxo52A_Y2bkznogpZ9-s9g6NbjXk"
+CHAT_ID = "8493446835"
+
+
+def send_telegram(text):
+  url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+  data = json.dumps({"chat_id": CHAT_ID, "text": text}).encode("utf-8")
+  req = urllib.request.Request(
+      url, data=data, headers={"Content-Type": "application/json"}
+  )
+  try:
+    with urllib.request.urlopen(req, timeout=10) as response:
+      pass
+  except Exception as e:
+    print(f"خطأ: {e}")
+
+
+# رسالة بدء العمل السحابي
+send_telegram(
+    "☁️ تم تشغيل بوت حكيم رائد الغفاري على السيرفر السحابي (24/7) بنجاح!\nيعمل"
+    " الآن بشكل مستقل تماماً عن هاتفك وإنترنتك."
+)
+
+
+def get_json(url):
+  req = urllib.request.Request(
+      url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+  )
+  with urllib.request.urlopen(req, timeout=10) as response:
+    return json.loads(response.read().decode("utf-8"))
+
+
+def calculate_rsi(closes, period=14):
+  if len(closes) < period + 1:
+    return 50
+  deltas = [closes[i] - closes[i - 1] for i in range(1, len(closes))]
+  gains = [d if d > 0 else 0 for d in deltas]
+  losses = [-d if d < 0 else 0 for d in deltas]
+  avg_gain = sum(gains[:period]) / period
+  avg_loss = sum(losses[:period]) / period
+  for i in range(period, len(deltas)):
+    avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+    avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+  if avg_loss == 0:
+    return 100
+  rs = avg_gain / avg_loss
+  return 100 - (100 / (1 + rs))
+
+
+def scan():
+  while True:
+    try:
+      tickers = get_json("https://fapi.binance.com/fapi/v1/ticker/24hr")
+      for item in tickers:
+        symbol = item["symbol"]
+        if symbol.endswith("USDT"):
+          change = float(item["priceChangePercent"])
+          if change >= 5.0:  # فحص العملات الصاعدة فوق 5%
+            try:
+              klines = get_json(
+                  f"https://fapi.binance.com/fapi/v1/klines?symbol={symbol}&interval=15m&limit=50"
+              )
+              if len(klines) < 50:
+                continue
+
+              opens = [float(k[1]) for k in klines]
+              highs = [float(k[2]) for k in klines]
+              closes = [float(k[4]) for k in klines]
+              volumes = [float(k[5]) for k in klines]
+
+              last_open, last_high, last_close = (
+                  opens[-1],
+                  highs[-1],
+                  closes[-1],
+              )
+              last_volume = volumes[-1]
+              past_price = closes[-8]
+              pump_pct = ((last_high - past_price) / past_price) * 100
+              avg_vol = sum(volumes[-20:-1]) / 19
+              vol_spike = last_volume / avg_vol if avg_vol > 0 else 1
+              rsi = calculate_rsi(closes)
+
+              if pump_pct >= 5.0 and vol_spike >= 1.4 and rsi >= 70:
+                stop_loss = round(last_high * 1.015, 5)
+                target_1 = round(
+                    last_close - (last_high - past_price) * 0.382, 5
+                )
+                target_2 = round(
+                    last_close - (last_high - past_price) * 0.50, 5
+                )
+
+                msg = (
+                    f"🚨 فرصة شورت سحابية (انعكاس هابط)\n\n"
+                    f"العملة: {symbol}\n"
+                    f"نسبة الصعود: +{pump_pct:.1f}%\n"
+                    f"مؤشر RSI: {rsi:.1f}\n"
+                    f"سعر الدخول المقترح: {last_close}\n"
+                    f"وقف الخسارة (SL): {stop_loss}\n"
+                    f"الهدف الأول: {target_1}\n"
+                    f"الهدف الثاني: {target_2}"
+                )
+                send_telegram(msg)
+                time.sleep(2)
+            except Exception:
+              continue
+    except Exception as e:
+      print(f"خطأ في الفحص: {e}")
+    time.sleep(60)
+
+
+# تشغيل الفحص في الخلفية
+threading.Thread(target=scan, daemon=True).start()
+
+
+# خادم ويب لإبقاء الخدمة نشطة 24/7
+class HealthHandler(BaseHTTPRequestHandler):
+
+  def do_GET(self):
+    self.send_response(200)
+    self.end_headers()
+    self.wfile.write(b"Bot is Running 24/7")
+
+
+server = HTTPServer(("0.0.0.0", 8080), HealthHandler)
+server.serve_forever()
