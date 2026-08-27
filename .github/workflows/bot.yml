@@ -1,23 +1,23 @@
-name: 24/7 Cloud Trading Radar - Abed Alhakim
+name: 24/7 Live Crypto Radar & News - Abed Alhakim
 
 on:
   schedule:
-    - cron: '*/5 * * * *' # تشغيل دوري سحابي كل 5 دقائق
-  workflow_dispatch:      # تشغيل فوري في أي وقت
+    - cron: '*/5 * * * *' # تشغيل مستمر في السحابة
+  workflow_dispatch:      # إمكانية التشغيل الفوري
 
 jobs:
-  run-scanner:
+  live-scanner:
     runs-on: ubuntu-latest
     steps:
       - name: تحميل أحدث إصدار
         uses: actions/checkout@v4
 
-      - name: تثبيت بايثون 3.11
+      - name: تجهيز بايثون 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: تشغيل رادار عبد الحكيم رائد
+      - name: تشغيل رادار الأخبار والصفقات اللحظي
         run: |
           python -c "
           import urllib.request, json, time
@@ -62,76 +62,78 @@ jobs:
               if avg_loss == 0: return 100
               return 100 - (100 / (1 + (avg_gain / avg_loss)))
 
-          # رسالة نبض الفحص اللحظي
-          fng_val, fng_class = get_market_sentiment()
-          now_time = datetime.utcnow().strftime('%H:%M:%S UTC')
-          
-          heartbeat_msg = (
-              f'📡 *رادار عبد الحكيم رائد الفني | الفحص السحابي نشط*\n'
-              f'━━━━━━━━━━━━━━━━━━\n'
-              f'⏱ *توقيت الفحص:* `{now_time}`\n'
-              f'🧠 *معنويات السوق (Fear & Greed):* `{fng_class} ({fng_val}/100)`\n'
-              f'🔍 *الحالة:* جاري المسح الشامل لجميع عقود بينانس الآجلة ورصد صفقات الشورت...\n'
-              f'☁️ *السيرفر السحابي:* متصل 24/7 ومستقل عن هاتفك'
-          )
-          send_telegram(heartbeat_msg)
+          # تشغيل دورة الفحص السريع (كل 35 ثانية)
+          for cycle in range(8):
+              now_str = datetime.utcnow().strftime('%H:%M:%S UTC')
+              fng_val, fng_class = get_market_sentiment()
 
-          # فحص عملات بينانس
-          try:
-              tickers = get_json('https://fapi.binance.com/fapi/v1/ticker/24hr')
-              for item in tickers:
-                  symbol = item['symbol']
-                  if symbol.endswith('USDT') and float(item['priceChangePercent']) >= 5.0:
-                      try:
-                          klines = get_json(f'https://fapi.binance.com/fapi/v1/klines?symbol={symbol}&interval=15m&limit=50')
-                          if len(klines) < 50: continue
-                          opens = [float(k[1]) for k in klines]
-                          highs = [float(k[2]) for k in klines]
-                          closes = [float(k[4]) for k in klines]
-                          volumes = [float(k[5]) for k in klines]
-                          
-                          last_open, last_high, last_close = opens[-1], highs[-1], closes[-1]
-                          last_volume = volumes[-1]
-                          past_price = closes[-8]
-                          pump_pct = ((last_high - past_price) / past_price) * 100
-                          avg_vol = sum(volumes[-20:-1]) / 19
-                          vol_spike = last_volume / avg_vol if avg_vol > 0 else 1
-                          rsi = calculate_rsi(closes)
+              # رسالة النبض والأخبار اللحظية
+              pulse_msg = (
+                  f'⚡ *رادار عبد الحكيم رائد | التقرير اللحظي للسوق*\n'
+                  f'━━━━━━━━━━━━━━━━━━\n'
+                  f'⏱ *توقيت الرصد:* `{now_str}`\n'
+                  f'🧠 *معنويات السوق العالمية:* `{fng_class} ({fng_val}/100)`\n'
+                  f'📡 *حالة الفحص:* مسح نشط لجميع عقود بينانس الآجلة ورصد السيولة والقمم...\n'
+                  f'━━━━━━━━━━━━━━━━━━'
+              )
+              send_telegram(pulse_msg)
 
-                          candle_body = abs(last_close - last_open)
-                          upper_wick = last_high - max(last_open, last_close)
+              # فحص فرص السوق
+              try:
+                  tickers = get_json('https://fapi.binance.com/fapi/v1/ticker/24hr')
+                  for item in tickers:
+                      symbol = item['symbol']
+                      if symbol.endswith('USDT') and float(item['priceChangePercent']) >= 5.0:
+                          try:
+                              klines = get_json(f'https://fapi.binance.com/fapi/v1/klines?symbol={symbol}&interval=15m&limit=50')
+                              if len(klines) < 50: continue
+                              opens = [float(k[1]) for k in klines]
+                              highs = [float(k[2]) for k in klines]
+                              closes = [float(k[4]) for k in klines]
+                              volumes = [float(k[5]) for k in klines]
 
-                          # معايير رصد قمة الانعكاس
-                          if pump_pct >= 5.0 and vol_spike >= 1.4 and rsi >= 70:
-                              if upper_wick > (candle_body * 0.4) or (last_close < last_high * 0.985):
-                                  stop_loss = round(last_high * 1.015, 5)
-                                  target_1 = round(last_close - (last_high - past_price) * 0.382, 5)
-                                  target_2 = round(last_close - (last_high - past_price) * 0.50, 5)
+                              last_open, last_high, last_close = opens[-1], highs[-1], closes[-1]
+                              last_volume = volumes[-1]
+                              past_price = closes[-8]
+                              pump_pct = ((last_high - past_price) / past_price) * 100
+                              avg_vol = sum(volumes[-20:-1]) / 19
+                              vol_spike = last_volume / avg_vol if avg_vol > 0 else 1
+                              rsi = calculate_rsi(closes)
+                              candle_body = abs(last_close - last_open)
+                              upper_wick = last_high - max(last_open, last_close)
 
-                                  signal_msg = (
-                                      f'🚨 *فرصة شورت استثنائية (Short Signal)* 🚨\n'
-                                      f'👑 *منظومة عبد الحكيم رائد للتحليل الكمي*\n'
-                                      f'━━━━━━━━━━━━━━━━━━\n'
-                                      f'📌 *العملة:* `#{symbol}`\n'
-                                      f'📈 *نسبة الصعود الخاطف:* `+{pump_pct:.1f}%`\n'
-                                      f'📊 *مؤشر RSI (تشبع قمة):* `{rsi:.1f}`\n'
-                                      f'🌊 *تدفق الفوليوم:* `{vol_spike:.1f}x ضعف المعدل`\n'
-                                      f'━━━━━━━━━━━━━━━━━━\n'
-                                      f'💰 *سعر الدخول المقترح:* `{last_close}`\n'
-                                      f'🛑 *وقف الخسارة الصارم (SL):* `{stop_loss}`\n'
-                                      f'🎯 *الهدف الأول (TP1):* `{target_1}`\n'
-                                      f'🎯 *الهدف الثاني (TP2):* `{target_2}`\n'
-                                      f'━━━━━━━━━━━━━━━━━━\n'
-                                      f'💡 *نصيحة عبد الحكيم الاستراتيجية:*\n'
-                                      f'• التزم بإدارة رأس مال حكيمة (مخاطرة 1% إلى 2% كحد أقصى).\n'
-                                      f'• استخدم رافعة مالية معتدلة (3x - 5x).\n'
-                                      f'• فور تحقيق الهدف الأول، حرّك وقف الخسارة إلى نقطة الدخول لتأمين ربحك.'
-                                  )
-                                  send_telegram(signal_msg)
-                                  time.sleep(2)
-                      except Exception:
-                          continue
-          except Exception as e:
-              print('Scan error:', e)
+                              if pump_pct >= 5.0 and vol_spike >= 1.4 and rsi >= 70:
+                                  if upper_wick > (candle_body * 0.4) or (last_close < last_high * 0.985):
+                                      stop_loss = round(last_high * 1.015, 5)
+                                      target_1 = round(last_close - (last_high - past_price) * 0.382, 5)
+                                      target_2 = round(last_close - (last_high - past_price) * 0.50, 5)
+
+                                      signal_msg = (
+                                          f'🚨 *فرصة شورت مؤكدة (Signal Alert)* 🚨\n'
+                                          f'👑 *منظومة عبد الحكيم رائد للتحليل المتقدم*\n'
+                                          f'━━━━━━━━━━━━━━━━━━\n'
+                                          f'📌 *العملة:* `#{symbol}`\n'
+                                          f'📈 *نسبة الصعود الخاطف:* `+{pump_pct:.1f}%`\n'
+                                          f'📊 *مؤشر RSI:* `{rsi:.1f}`\n'
+                                          f'🌊 *تدفق الفوليوم:* `{vol_spike:.1f}x ضعف المعدل`\n'
+                                          f'━━━━━━━━━━━━━━━━━━\n'
+                                          f'💰 *سعر الدخول المقترح:* `{last_close}`\n'
+                                          f'🛑 *وقف الخسارة الصارم (SL):* `{stop_loss}`\n'
+                                          f'🎯 *الهدف الأول (TP1):* `{target_1}`\n'
+                                          f'🎯 *الهدف الثاني (TP2):* `{target_2}`\n'
+                                          f'━━━━━━━━━━━━━━━━━━\n'
+                                          f'💡 *نصيحة عبد الحكيم الاستراتيجية:*\n'
+                                          f'• الدخول بـ 1% إلى 2% فقط من رأس المال.\n'
+                                          f'• رافعة مالية معتدلة (3x - 5x).\n'
+                                          f'• تأمين الصفقة ونقل الوقف لنقطة الدخول عند ملامسة الهدف الأول.'
+                                      )
+                                      send_telegram(signal_msg)
+                                      time.sleep(2)
+                          except Exception:
+                              continue
+              except Exception as e:
+                  print('Scan error:', e)
+
+              time.sleep(35)
           "
           
