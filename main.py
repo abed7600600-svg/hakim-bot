@@ -1,17 +1,10 @@
 # ============================================================
-# ABED FUTURES RADAR - V2
+# ABED FUTURES RADAR - V2 (بوت حكيم)
 # Binance USD-M Futures
-# LONG + SHORT
-# Multi Time Frame
-# EMA + RSI + MACD + ATR + VWAP
-# Volume + Support/Resistance
-# Funding Rate + Open Interest
-# BTC Market Filter
-# Entry + SL + TP1 + TP2 + TP3
-# Signal Score
-# Telegram Alerts
-#
-# ALERT ONLY - NO REAL TRADING
+# LONG + SHORT | Multi Time Frame (4H, 1H, 15M, 5M)
+# EMA + RSI + MACD + ATR + VWAP + Volume + S/R
+# Funding Rate + Open Interest + BTC Market Filter
+# Entry + SL + TP1 + TP2 + TP3 + Signal Score + Telegram Alerts
 # ============================================================
 
 from datetime import datetime, timezone
@@ -22,35 +15,37 @@ import urllib.parse
 import os
 
 # ============================================================
-# 1) TELEGRAM
+# 1) إعدادات التلجرام
 # ============================================================
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "PUT_NEW_BOT_TOKEN_HERE")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "PUT_CHAT_ID_HERE")
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8641484254:AAGs6MFyxo52A_Y2bkznogpZ9-s9g6NbjXk")
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "8493446835")
 
 # ============================================================
-# 2) SETTINGS
+# 2) إعدادات الرادار
 # ============================================================
 
+# الفاصل الزمني بين كل دورة فحص بالثواني
 SCAN_SECONDS = 30
 
-# لا ترسل إشارة إلا إذا وصلت لهذه الدرجة
-MIN_SCORE = 82
+# الحد الأدنى لقوة الإشارة لإرسال التنبيه (من 100)
+MIN_SCORE = 78
 
-# عدد العملات التي يتم فحصها
+# عدد العملات الأكثر سيولة التي يتم فحصها
 MAX_SYMBOLS = 70
 
-# أقل حجم تداول 24 ساعة
+# الحد الأدنى لحجم التداول في 24 ساعة (بالدولار)
 MIN_QUOTE_VOLUME = 5_000_000
 
-# منع تكرار نفس العملة ونفس الاتجاه (بالثواني)
+# فترة الانتظار قبل تكرار نفس العملة (1800 ثانية = 30 دقيقة)
 SIGNAL_COOLDOWN = 1800
 
 # ============================================================
-# 3) BINANCE FUTURES
+# 3) منصة بينانس
 # ============================================================
 
 BINANCE = "https://fapi.binance.com"
 
+# استبعاد العملات المستقرة
 EXCLUDED = {
     "USDCUSDT",
     "FDUSDUSDT",
@@ -61,14 +56,14 @@ EXCLUDED = {
 last_signal_time = {}
 
 # ============================================================
-# 4) HTTP
+# 4) طلبات HTTP
 # ============================================================
 
 def get_json(url, timeout=15):
     req = urllib.request.Request(
         url,
         headers={
-            "User-Agent": "ABED-FUTURES-RADAR/2.0"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ABED-RADAR/2.0"
         }
     )
     with urllib.request.urlopen(req, timeout=timeout) as response:
@@ -76,17 +71,12 @@ def get_json(url, timeout=15):
 
 
 # ============================================================
-# 5) TELEGRAM
+# 5) إرسال تنبيهات التلجرام
 # ============================================================
 
 def send_telegram(text):
-    if (
-        not BOT_TOKEN
-        or BOT_TOKEN == "PUT_NEW_BOT_TOKEN_HERE"
-        or not CHAT_ID
-        or CHAT_ID == "PUT_CHAT_ID_HERE"
-    ):
-        print("⚠️ يرجى ضبط BOT_TOKEN و CHAT_ID في Secrets أو كمتغيرات بيئة")
+    if not BOT_TOKEN or not CHAT_ID:
+        print("⚠️ يرجى التأكد من ضبط BOT_TOKEN و CHAT_ID")
         return False
 
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -109,7 +99,7 @@ def send_telegram(text):
     try:
         with urllib.request.urlopen(req, timeout=15) as response:
             response.read()
-        print("✅ Telegram: Delivered")
+        print("✅ Telegram: تم إرسال الرسالة بنجاح")
         return True
     except Exception as e:
         print(f"❌ Telegram Error: {e}")
@@ -117,16 +107,12 @@ def send_telegram(text):
 
 
 # ============================================================
-# 6) BINANCE TICKERS
+# 6) جلب قائمة العملات النشطة
 # ============================================================
 
 def get_tickers():
     return get_json(BINANCE + "/fapi/v1/ticker/24hr")
 
-
-# ============================================================
-# 7) SELECT LIQUID SYMBOLS
-# ============================================================
 
 def get_symbols():
     try:
@@ -155,7 +141,7 @@ def get_symbols():
                 "change": change
             })
 
-        # ترتيب حسب السيولة
+        # ترتيب حسب أعلى سيولة
         result.sort(key=lambda x: x["volume"], reverse=True)
         return [x["symbol"] for x in result[:MAX_SYMBOLS]]
 
@@ -165,7 +151,7 @@ def get_symbols():
 
 
 # ============================================================
-# 8) KLINES
+# 7) جلب بيانات الشموع (Klines)
 # ============================================================
 
 def get_klines(symbol, interval, limit=220):
@@ -177,10 +163,6 @@ def get_klines(symbol, interval, limit=220):
     url = f"{BINANCE}/fapi/v1/klines?{params}"
     return get_json(url)
 
-
-# ============================================================
-# 9) CANDLE DATA
-# ============================================================
 
 def parse_klines(klines):
     opens, highs, lows, closes, volumes = [], [], [], [], []
@@ -194,7 +176,7 @@ def parse_klines(klines):
 
 
 # ============================================================
-# 10) EMA
+# 8) المؤشرات الفنية (EMA, RSI, ATR, MACD, VWAP)
 # ============================================================
 
 def EMA(values, period):
@@ -206,10 +188,6 @@ def EMA(values, period):
         result = ((price - result) * multiplier) + result
     return result
 
-
-# ============================================================
-# 11) RSI
-# ============================================================
 
 def RSI(values, period=14):
     if len(values) <= period:
@@ -234,10 +212,6 @@ def RSI(values, period=14):
     return 100 - (100 / (1 + rs))
 
 
-# ============================================================
-# 12) ATR
-# ============================================================
-
 def ATR(highs, lows, closes, period=14):
     if len(closes) <= period:
         return None
@@ -251,10 +225,6 @@ def ATR(highs, lows, closes, period=14):
         trs.append(tr)
     return sum(trs[-period:]) / period
 
-
-# ============================================================
-# 13) MACD
-# ============================================================
 
 def MACD(values):
     if len(values) < 50:
@@ -277,10 +247,6 @@ def MACD(values):
     return macd_values[-1], signal
 
 
-# ============================================================
-# 14) VWAP
-# ============================================================
-
 def VWAP(klines):
     total_volume = 0
     total_value = 0
@@ -298,10 +264,6 @@ def VWAP(klines):
     return total_value / total_volume
 
 
-# ============================================================
-# 15) VOLUME SPIKE
-# ============================================================
-
 def volume_spike(volumes, period=20):
     if len(volumes) < period + 1:
         return 1
@@ -311,10 +273,6 @@ def volume_spike(volumes, period=20):
     return volumes[-1] / average
 
 
-# ============================================================
-# 16) SUPPORT / RESISTANCE
-# ============================================================
-
 def support_resistance(highs, lows, lookback=60):
     support = min(lows[-lookback:])
     resistance = max(highs[-lookback:])
@@ -322,7 +280,7 @@ def support_resistance(highs, lows, lookback=60):
 
 
 # ============================================================
-# 17) FUNDING RATE
+# 9) معدل التمويل والعقود المفتوحة
 # ============================================================
 
 def get_funding(symbol):
@@ -337,10 +295,6 @@ def get_funding(symbol):
         return 0
 
 
-# ============================================================
-# 18) OPEN INTEREST
-# ============================================================
-
 def get_open_interest(symbol):
     try:
         params = urllib.parse.urlencode({"symbol": symbol})
@@ -352,7 +306,7 @@ def get_open_interest(symbol):
 
 
 # ============================================================
-# 19) BTC MARKET REGIME
+# 10) فحص اتجاه البيتكوين العام
 # ============================================================
 
 def btc_regime():
@@ -376,7 +330,7 @@ def btc_regime():
 
 
 # ============================================================
-# 20) ANALYZE ONE TIMEFRAME
+# 11) تحليل فريم زمني واحد
 # ============================================================
 
 def analyze(symbol, interval):
@@ -402,7 +356,7 @@ def analyze(symbol, interval):
         bullish = 0
         bearish = 0
 
-        # EMA TREND
+        # اتجاه EMA
         if e20 and e50 and e200:
             if price > e20 and e20 > e50 and e50 > e200:
                 bullish += 20
@@ -430,14 +384,14 @@ def analyze(symbol, interval):
             elif price < vwap:
                 bearish += 10
 
-        # VOLUME
+        # Volume Spike
         if vol_spike >= 1.4:
             if price > opens[-1]:
                 bullish += 10
             elif price < opens[-1]:
                 bearish += 10
 
-        # BREAKOUT / BREAKDOWN
+        # Breakout / Breakdown
         previous_high = max(highs[-11:-1])
         previous_low = min(lows[-11:-1])
 
@@ -462,17 +416,17 @@ def analyze(symbol, interval):
             "bullish": bullish,
             "bearish": bearish
         }
-    except Exception as e:
+    except Exception:
         return None
 
 
 # ============================================================
-# 21) BUILD SIGNAL
+# 12) بناء وحساب قوة الإشارة (Multi-Timeframe)
 # ============================================================
 
 def build_signal(symbol):
     try:
-        # Multi Time Frame
+        # فحص الفريمات المتعددة
         tf4h = analyze(symbol, "4h")
         tf1h = analyze(symbol, "1h")
         tf15 = analyze(symbol, "15m")
@@ -488,31 +442,31 @@ def build_signal(symbol):
         long_score = 0
         short_score = 0
 
-        # 4H TREND
+        # اتجاه 4H
         if tf4h["bullish"] >= 25:
             long_score += 20
         if tf4h["bearish"] >= 25:
             short_score += 20
 
-        # 1H
+        # فريم 1H
         if tf1h["bullish"] >= 25:
             long_score += 15
         if tf1h["bearish"] >= 25:
             short_score += 15
 
-        # 15M
+        # فريم 15M
         if tf15["bullish"] >= 25:
             long_score += 15
         if tf15["bearish"] >= 25:
             short_score += 15
 
-        # 5M
+        # فريم 5M
         if tf5["bullish"] >= 25:
             long_score += 15
         if tf5["bearish"] >= 25:
             short_score += 15
 
-        # BTC FILTER
+        # تأثير اتجاه البيتكوين
         if btc == "BULLISH":
             long_score += 10
             short_score -= 10
@@ -520,20 +474,20 @@ def build_signal(symbol):
             short_score += 10
             long_score -= 10
 
-        # FUNDING
+        # معدل التمويل Funding Rate
         if funding > 0.0005:
             short_score += 5
         elif funding < -0.0005:
             long_score += 5
 
-        # VOLUME
+        # فوليوم فريم 5M مع VWAP
         if tf5["volume_spike"] >= 1.5:
             if tf5["price"] > tf5["vwap"]:
                 long_score += 5
             elif tf5["price"] < tf5["vwap"]:
                 short_score += 5
 
-        # SELECT DIRECTION
+        # اختيار اتجاه الصفقة
         if long_score >= MIN_SCORE and long_score > short_score + 10:
             direction = "LONG"
             score = min(long_score, 100)
@@ -543,7 +497,7 @@ def build_signal(symbol):
         else:
             return None
 
-        # ENTRY / SL / TP
+        # حساب مستويات الدخول والوقف والأهداف بناءً على ATR والدعم/المقاومة
         price = tf5["price"]
         atr = tf5["atr"]
 
@@ -597,13 +551,13 @@ def build_signal(symbol):
 
 
 # ============================================================
-# 22) FORMAT & SEND ALERT
+# 13) صياغة التنبيه باللغة العربية وتنسيق HTML
 # ============================================================
 
 def format_alert(signal):
-    dir_emoji = "🟢 LONG" if signal["direction"] == "LONG" else "🔴 SHORT"
+    dir_emoji = "🟢 LONG (شراء)" if signal["direction"] == "LONG" else "🔴 SHORT (بيع)"
     text = (
-        f"🚨 <b>ABED FUTURES RADAR V2</b> 🚨\n\n"
+        f"🚨 <b>إشارة تداول جديدة | رادار حكيم</b> 🚨\n\n"
         f"🪙 <b>العملة:</b> #{signal['symbol']}\n"
         f"📊 <b>الاتجاه:</b> {dir_emoji}\n"
         f"⭐ <b>قوة الإشارة:</b> {signal['score']}/100\n"
@@ -615,22 +569,22 @@ def format_alert(signal):
         f"🎯 <b>الهدف الثالث (TP3):</b> <code>{signal['tp3']:.4f}</code>\n\n"
         f"🌐 <b>حالة البيتكوين:</b> {signal['btc']}\n"
         f"📈 <b>Funding Rate:</b> {signal['funding']:.5%}\n"
-        f"⏰ <b>الوقت:</b> {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}"
+        f"⏰ <b>التوقيت:</b> {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}"
     )
     return text
 
 
 # ============================================================
-# 23) MAIN SCAN LOOP
+# 14) دورة الفحص الرئيسية
 # ============================================================
 
 def scan_once():
     symbols = get_symbols()
-    print(f"🔍 فحص {len(symbols)} عملة نشطة...")
+    print(f"🔍 فحص {len(symbols)} عملة في سوق العقود الآجلة...")
 
     for symbol in symbols:
         now = time.time()
-        # Cooldown check
+        # منع تكرار نفس العملة خلال مدة التبريد
         if symbol in last_signal_time:
             if now - last_signal_time[symbol] < SIGNAL_COOLDOWN:
                 continue
@@ -644,15 +598,22 @@ def scan_once():
 
 
 def run_radar():
-    print("🚀 بدء تشغيل Abed Futures Radar V2...")
+    print("🚀 بدء تشغيل بوت حكيم - Abed Futures Radar V2...")
+    
+    # إرسال رسالة ترحيبية وتأكيد فور تشغيل الكود
+    send_telegram(
+        "🟢 <b>تم تشغيل رادار حكيم للعقود الآجلة بنجاح!</b>\n\n"
+        "📡 <i>جاري فحص وتتبع إشارات السوق عبر منصة بينانس...</i>"
+    )
+    
     while True:
         try:
             scan_once()
         except Exception as e:
-            print(f"Error in scan cycle: {e}")
+            print(f"حدث خطأ أثناء الفحص: {e}")
         time.sleep(SCAN_SECONDS)
 
 
 if __name__ == "__main__":
     run_radar()
-            
+        
