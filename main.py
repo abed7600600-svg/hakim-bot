@@ -1,5 +1,5 @@
 # ============================================================
-# ABED LIVE RADAR & NEWS STREAM - V2
+# ABED LIVE RADAR & NEWS STREAM - V2 (FIXED)
 # Binance USD-M Futures + CoinGecko Live News
 # ============================================================
 
@@ -120,7 +120,7 @@ def parse_klines(klines):
         opens.append(float(k))
         highs.append(float(k))
         lows.append(float(k))
-        closes.append(float(k[4]))
+        closes.append(float(k))
         volumes.append(float(k[5]))
     return opens, highs, lows, closes, volumes
 
@@ -251,18 +251,5 @@ def format_signal_msg(sig, btc_t):
         f"🚨 <b>إشارة تداول عاجلة | رادار حكيم</b> 🚨\n\n"
         f"🪙 <b>العملة:</b> <code>#{sig['symbol']}</code>\n"
         f"📊 <b>الاتجاه:</b> {dir_txt}\n"
-        f"⭐ <b>قوة الإشارة:</b> {sig['score']}/100\n"
-        f"💵 <b>السعر اللحظي:</b> <code>{sig['price']:.4f}</code>\n\n"
-        f"🎯 <b>منطقة الدخول:</b> <code>{sig['entry_low']:.4f}</code> ⬅️ <code>{sig['entry_high']:.4f}</code>\n"
-        f"🛑 <b>وقف الخسارة (SL):</b> <code>{sig['sl']:.4f}</code>\n"
-        f"🎯 <b>الهدف 1:</b> <code>{sig['tp1']:.4f}</code>\n"
-        f"🎯 <b>الهدف 2:</b> <code>{sig['tp2']:.4f}</code>\n"
-        f"🎯 <b>الهدف 3:</b> <code>{sig['tp3']:.4f}</code>\n\n"
-        f"🌐 <b>حالة البيتكوين:</b> {btc_t}\n"
-        f"⏰ <b>الوقت:</b> {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}"
-    )
-
-
-def format_radar_pulse(gainers, losers, trending, btc_t, btc_p):
-    gainers_str = " | ".join([f"#{g['symbol'].replace('USDT','')
-                                  
+        f"⭐ <b>قوة الإشارة:</b> {sig['score']}/100\
+    
