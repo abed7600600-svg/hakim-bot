@@ -1,6 +1,6 @@
 # ============================================================
-# ABED LIVE 24/7 GLOBAL NEWS RADAR (بث الأخبار كل 30 ثانية)
-# Real-Time Global Crypto & Finance News Feed
+# ABED LIVE 24/7 ARABIC NEWS RADAR (أخبار عالمية مترجمة كل 30 ثانية)
+# Real-Time Global Crypto & Finance News Translated to Arabic
 # Sources: CoinDesk, CoinTelegraph, CryptoCompare, Decrypt
 # ============================================================
 
@@ -19,7 +19,7 @@ import os
 BOT_TOKEN = "8641484254:AAGs6MFyxo52A_Y2bkznogpZ9-s9g6NbjXk"
 CHAT_ID = "8493446835"
 
-# إرسال خبر كل 30 ثانية
+# إرسال خبر مترجم كل 30 ثانية
 SCAN_SECONDS = 30
 
 ssl_ctx = ssl.create_default_context()
@@ -35,33 +35,53 @@ sent_news_titles = set()
 news_archive = []
 
 # ============================================================
-# 2) دالة إرسال الرسائل لتليجرام
+# 2) دالة الترجمة التلقائية إلى اللغة العربية
+# ============================================================
+def translate_to_arabic(text):
+    if not text or not text.strip():
+        return ""
+    try:
+        url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=ar&dt=t&q=" + urllib.parse.quote(text)
+        req = urllib.request.Request(url, headers=HEADERS)
+        with urllib.request.urlopen(req, timeout=5, context=ssl_ctx) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            if data and isinstance(data, list) and len(data) > 0 and data[0]:
+                parts = [part[0] for part in data[0] if part and len(part) > 0 and part[0]]
+                return "".join(parts)
+        return text
+    except Exception:
+        return text
+
+# ============================================================
+# 3) دالة إرسال الرسائل لتليجرام
 # ============================================================
 def send_telegram(text):
+    if not BOT_TOKEN or not CHAT_ID:
+        return False
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": CHAT_ID,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": False
+    }
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={"Content-Type": "application/json", **HEADERS}
+    )
     try:
-        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-        payload = {
-            "chat_id": CHAT_ID,
-            "text": text,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": False
-        }
-        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        req = urllib.request.Request(
-            url,
-            data=data,
-            headers={"Content-Type": "application/json", **HEADERS}
-        )
         with urllib.request.urlopen(req, timeout=10, context=ssl_ctx) as response:
             response.read()
-        print("✅ تم إرسال الخبر إلى تليجرام")
+        print("✅ تم إرسال الخبر المترجم إلى تليجرام")
         return True
     except Exception as e:
         print(f"❌ خطأ تليجرام: {e}")
         return False
 
 # ============================================================
-# 3) محرك سحب الأخبار من المصادر الدولية
+# 4) محرك سحب الأخبار من الوكالات العالمية
 # ============================================================
 def fetch_all_sources():
     global news_archive
@@ -78,7 +98,7 @@ def fetch_all_sources():
                     "title": a.get("title", ""),
                     "source": a.get("source_info", {}).get("name", "CryptoNews"),
                     "url": a.get("url", ""),
-                    "body": a.get("body", "")[:160] + "..." if a.get("body") else ""
+                    "body": a.get("body", "")[:180] if a.get("body") else ""
                 })
     except Exception:
         pass
@@ -98,7 +118,7 @@ def fetch_all_sources():
                         "title": title,
                         "source": "CoinDesk",
                         "url": link,
-                        "body": desc[:160] + "..." if desc else ""
+                        "body": desc[:180] if desc else ""
                     })
     except Exception:
         pass
@@ -126,67 +146,68 @@ def fetch_all_sources():
         news_archive = articles
     return news_archive
 
-
-def get_next_news_bulletin():
+# ============================================================
+# 5) تجهيز وترجمة النشرة الإخبارية
+# ============================================================
+def get_next_translated_bulletin():
     all_news = fetch_all_sources()
     if not all_news:
         return None
 
-    # البحث عن أخبار جديدة لم تُرسل بعد
+    # البحث عن أخبار لم تُرسل بعد
     fresh = [a for a in all_news if a["title"] not in sent_news_titles]
     
     if not fresh:
         sent_news_titles.clear()
         fresh = all_news
 
-    # اختيار أحدث خبرين
+    # اختيار أحدث خبرين وترجمتهما فورياً
     chosen = fresh[:2]
     for c in chosen:
         sent_news_titles.add(c["title"])
 
     formatted_items = []
     for art in chosen:
+        # ترجمة العنوان والملخص للعربية
+        ar_title = translate_to_arabic(art["title"])
+        ar_body = translate_to_arabic(art["body"]) if art.get("body") else ""
+
         item_text = (
-            f"🌐 <b>مصدر الخبر:</b> <code>{art['source']}</code>\n"
-            f"📌 <b>العنوان:</b> <b>{art['title']}</b>"
+            f"🌐 <b>المصدر:</b> <code>{art['source']}</code>\n"
+            f"📌 <b>العنوان:</b> <b>{ar_title}</b>"
         )
-        if art.get("body"):
-            item_text += f"\n\n📝 <i>{art['body']}</i>"
+        if ar_body:
+            item_text += f"\n\n📝 <b>التفاصيل:</b> <i>{ar_body}</i>"
         if art.get("url"):
-            item_text += f"\n🔗 <a href='{art['url']}'>اضغط هنا لقراءة الخبر كاملاً</a>"
+            item_text += f"\n🔗 <a href='{art['url']}'>اضغط هنا لقراءة المقال الأصلي</a>"
+            
         formatted_items.append(item_text)
 
     bulletin = (
-        f"🚨 <b>نشرة الأخبار العاجلة | رادار حكيم</b> 🚨\n\n"
+        f"🚨 <b>نشرة الأخبار العالمية المترجمة | رادار حكيم</b> 🚨\n\n"
         + "\n\n━━━━━━━━━━━━━━━━━━\n\n".join(formatted_items)
         + f"\n\n⏰ <b>التوقيت:</b> <code>{datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}</code>"
     )
     return bulletin
 
 # ============================================================
-# 4) دورة البث الإخباري المستمر
+# 6) حلقة البث الإخباري المترجم المستمر
 # ============================================================
 def run_news_stream():
-    print("🚀 بدء تشغيل رادار الأخبار الحية كل 30 ثانية...")
+    print("🚀 بدء تشغيل رادار الأخبار العالمية المترجمة للعربية كل 30 ثانية...")
     
     send_telegram(
-        "🟢 <b>تم تفعيل رادار حكيم للأخبار العالمية!</b>\n\n"
-        "📡 <i>ستصلك الآن نشرة بأحدث الأخبار والمستجدات الاقتصادية وأسواق الكريبتو كل 30 ثانية باستمرار.</i>"
+        "🟢 <b>تم تفعيل رادار الأخبار العالمية المترجمة للعربية!</b>\n\n"
+        "📡 <i>ستصلك الآن أحدث الأخبار الاقتصادية والعملات الرقمية مترجمة بالكامل كل 30 ثانية باستمرار.</i>"
     )
     
     while True:
         try:
-            bulletin = get_next_news_bulletin()
+            bulletin = get_next_translated_bulletin()
             if bulletin:
                 send_telegram(bulletin)
             else:
-                send_telegram("📡 <b>رادار الأخبار:</b> جاري تحديث ومتابعة وكالات الأنباء العالمية...")
+                send_telegram("📡 <b>رادار الأخبار:</b> جاري جلب وترجمة أحدث الأخبار العالمية...")
         except Exception as e:
             print(f"حدث خطأ أثناء البث: {e}")
             
-        time.sleep(SCAN_SECONDS)
-
-
-if __name__ == "__main__":
-    run_news_stream()
-    
