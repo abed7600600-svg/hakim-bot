@@ -1,5 +1,5 @@
 # ============================================================
-# ABED LIVE RADAR & NEWS STREAM - V2 (FIXED)
+# ABED LIVE RADAR & NEWS STREAM - V2
 # Binance USD-M Futures + CoinGecko Live News
 # ============================================================
 
@@ -31,7 +31,6 @@ BINANCE_FAPI = "https://fapi.binance.com"
 EXCLUDED = {"USDCUSDT", "FDUSDUSDT", "TUSDUSDT", "BUSDUSDT"}
 
 last_signals = {}
-cycle_counter = 0
 
 # ============================================================
 # 2) دوال الاتصال وتليجرام
@@ -115,13 +114,11 @@ def get_klines(symbol, interval, limit=100):
 
 
 def parse_klines(klines):
-    opens, highs, lows, closes, volumes = [], [], [], [], []
-    for k in klines:
-        opens.append(float(k))
-        highs.append(float(k))
-        lows.append(float(k))
-        closes.append(float(k))
-        volumes.append(float(k[5]))
+    opens = [float(k[1]) for k in klines]
+    highs = [float(k[2]) for k in klines]
+    lows = [float(k[3]) for k in klines]
+    closes = [float(k[4]) for k in klines]
+    volumes = [float(k[5]) for k in klines]
     return opens, highs, lows, closes, volumes
 
 
@@ -251,5 +248,86 @@ def format_signal_msg(sig, btc_t):
         f"🚨 <b>إشارة تداول عاجلة | رادار حكيم</b> 🚨\n\n"
         f"🪙 <b>العملة:</b> <code>#{sig['symbol']}</code>\n"
         f"📊 <b>الاتجاه:</b> {dir_txt}\n"
-        f"⭐ <b>قوة الإشارة:</b> {sig['score']}/100\
+        f"⭐ <b>قوة الإشارة:</b> {sig['score']}/100\n"
+        f"💵 <b>السعر اللحظي:</b> <code>{sig['price']:.4f}</code>\n\n"
+        f"🎯 <b>منطقة الدخول:</b> <code>{sig['entry_low']:.4f}</code> ⬅️ <code>{sig['entry_high']:.4f}</code>\n"
+        f"🛑 <b>وقف الخسارة (SL):</b> <code>{sig['sl']:.4f}</code>\n"
+        f"🎯 <b>الهدف 1:</b> <code>{sig['tp1']:.4f}</code>\n"
+        f"🎯 <b>الهدف 2:</b> <code>{sig['tp2']:.4f}</code>\n"
+        f"🎯 <b>الهدف 3:</b> <code>{sig['tp3']:.4f}</code>\n\n"
+        f"🌐 <b>حالة البيتكوين:</b> {btc_t}\n"
+        f"⏰ <b>الوقت:</b> {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}"
+    )
+
+
+def format_radar_pulse(gainers, losers, trending, btc_t, btc_p):
+    gainers_str = " | ".join([f"#{g['symbol'].replace('USDT','')}: +{g['change']:.1f}%" for g in gainers[:3]])
+    losers_str = " | ".join([f"#{l['symbol'].replace('USDT','')}: {l['change']:.1f}%" for l in losers[:3]])
+    
+    return (
+        f"📡 <b>نبض السوق والأخبار المباشرة | رادار حكيم</b>\n\n"
+        f"🪙 <b>سعر البيتكوين (BTC):</b> <code>${btc_p:,.1f}</code> ({btc_t})\n"
+        f"🔥 <b>العملات الأكثر رواجاً عالمياً (CoinGecko):</b>\n{trending}\n\n"
+        f"🚀 <b>الأعلى صعوداً الآن في بينانس:</b>\n{gainers_str}\n\n"
+        f"🔻 <b>الأعلى هبوطاً الآن في بينانس:</b>\n{losers_str}\n\n"
+        f"🔍 <i>تم فحص السوق - جاري المراقبة للدخول الآمن...</i>\n"
+        f"⏰ <b>التوقيت:</b> <code>{datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}</code>"
+    )
+
+# ============================================================
+# 7) حلقة البث المباشر
+# ============================================================
+
+def live_stream_cycle():
+    all_tickers = get_market_tickers()
+    if not all_tickers:
+        return
+
+    btc_t, btc_p = btc_status()
+    top_symbols = [t["symbol"] for t in all_tickers[:MAX_SYMBOLS]]
+    
+    # فرز الأعلى ارتفاعاً وانخفاضاً
+    by_change = sorted(all_tickers, key=lambda x: x["change"], reverse=True)
+    gainers = by_change[:3]
+    losers = by_change[-3:]
+    losers.reverse()
+
+    # فحص صفقات التداول
+    signal_sent = False
+    for sym in top_symbols:
+        now = time.time()
+        if sym in last_signals and (now - last_signals[sym] < SIGNAL_COOLDOWN):
+            continue
+
+        sig = quick_analyze(sym)
+        if sig:
+            msg = format_signal_msg(sig, btc_t)
+            send_telegram(msg)
+            last_signals[sym] = now
+            signal_sent = True
+            break
+
+    # إذا لم تكن هناك صفقة مؤكدة، نرسل نبض السوق والأخبار
+    if not signal_sent:
+        trending = get_global_trending()
+        pulse_msg = format_radar_pulse(gainers, losers, trending, btc_t, btc_p)
+        send_telegram(pulse_msg)
+
+
+def run_radar():
+    print("🚀 بدء البث المباشر لرادار حكيم V2...")
+    send_telegram(
+        "🟢 <b>تم تفعيل البث المباشر لرادار حكيم!</b>\n\n"
+        "📡 <i>ستصلك الآن تحديثات ونبض السوق والأخبار والصفقات كل 30 ثانية باستمرار.</i>"
+    )
+    while True:
+        try:
+            live_stream_cycle()
+        except Exception as e:
+            print(f"خطأ: {e}")
+        time.sleep(SCAN_SECONDS)
+
+
+if __name__ == "__main__":
+    run_radar()
     
