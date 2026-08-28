@@ -594,3 +594,6 @@ def run_radar():
         time.sleep(SCAN_SECONDS)
 
 
+if __name__ == "__main__":
+    run_radar()
+    
