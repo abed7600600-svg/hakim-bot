@@ -1,65 +1,59 @@
 # ============================================================
-# ABED FUTURES RADAR V1
-# Binance USDⓈ-M Futures + Telegram + News
-#
-# LONG / SHORT
-# Multi-Timeframe
-# EMA / RSI / MACD / ATR / VWAP / Volume
-# Open Interest / Funding
+# ABED FUTURES RADAR - V2
+# Binance USD-M Futures
+# LONG + SHORT
+# Multi Time Frame
+# EMA + RSI + MACD + ATR + VWAP
+# Volume + Support/Resistance
+# Funding Rate + Open Interest
 # BTC Market Filter
-# Entry / SL / TP1 / TP2 / TP3
+# Entry + SL + TP1 + TP2 + TP3
 # Signal Score
+# Telegram Alerts
 #
-# V1 = ALERT ONLY
-# لا يوجد تنفيذ صفقات حقيقية
+# ALERT ONLY - NO REAL TRADING
 # ============================================================
 
-import os
+from datetime import datetime, timezone
 import json
 import time
-import math
-import hashlib
 import urllib.request
 import urllib.parse
-from datetime import datetime, timezone
+import os
 
 # ============================================================
-# CONFIG
+# 1) TELEGRAM
+# ============================================================
+# ضع التوكن والـ Chat ID هنا أو عبر متغيرات البيئة (Environment Variables)
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "PUT_NEW_BOT_TOKEN_HERE")
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "PUT_CHAT_ID_HERE")
+
+# ============================================================
+# 2) SETTINGS
 # ============================================================
 
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
-
-# اختياري - أخبار CoinGecko
-COINGECKO_API_KEY = os.getenv("COINGECKO_API_KEY", "")
-
-# كل دورة
 SCAN_SECONDS = 30
 
-# الحد الأدنى لقوة الإشارة
+# لا ترسل إشارة إلا إذا وصلت لهذه الدرجة
 MIN_SCORE = 82
 
-# لا نريد عددًا ضخمًا من العملات
-MAX_SYMBOLS = 80
+# عدد العملات التي يتم فحصها
+MAX_SYMBOLS = 70
 
-# الحد الأدنى للسيولة اليومية
+# أقل حجم تداول 24 ساعة
 MIN_QUOTE_VOLUME = 5_000_000
 
-# منع تكرار نفس الإشارة
-SIGNAL_COOLDOWN = 60 * 30
+# منع تكرار نفس العملة ونفس الاتجاه (بالثواني: 1800 = نصف ساعة)
+SIGNAL_COOLDOWN = 1800
 
-# ملف سجل الصفقات
-SIGNAL_LOG_FILE = "signals.json"
-
-# ============================================================
-# BINANCE FUTURES
-# ============================================================
-
-BINANCE_FAPI = "https://fapi.binance.com"
+# تقرير حالة الرادار كل 10 دورات مسح
+NEWS_EVERY = 10
 
 # ============================================================
-# EXCLUDED
+# 3) BINANCE FUTURES
 # ============================================================
+
+BINANCE = "https://fapi.binance.com"
 
 EXCLUDED = {
     "USDCUSDT",
@@ -68,58 +62,47 @@ EXCLUDED = {
     "BUSDUSDT",
 }
 
-# ============================================================
-# MEMORY
-# ============================================================
-
-last_signals = {}
+last_signal_time = {}
 
 # ============================================================
-# HTTP
+# 4) HTTP
 # ============================================================
 
-def http_get(url, headers=None, timeout=15):
-
-    if headers is None:
-        headers = {}
-
+def get_json(url, timeout=15):
     req = urllib.request.Request(
         url,
         headers={
-            "User-Agent": "ABED-FUTURES-RADAR/1.0",
-            **headers
+            "User-Agent": "ABED-FUTURES-RADAR/2.0"
         }
     )
-
     with urllib.request.urlopen(req, timeout=timeout) as response:
-        raw = response.read().decode("utf-8")
-
-    return json.loads(raw)
+        return json.loads(response.read().decode("utf-8"))
 
 
 # ============================================================
-# TELEGRAM
+# 5) TELEGRAM
 # ============================================================
 
 def send_telegram(text):
-
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print("Telegram credentials are missing.")
+    if (
+        not BOT_TOKEN
+        or BOT_TOKEN == "PUT_NEW_BOT_TOKEN_HERE"
+        or not CHAT_ID
+        or CHAT_ID == "PUT_CHAT_ID_HERE"
+    ):
+        print("ضع BOT_TOKEN و CHAT_ID أولاً")
         return False
 
-    url = (
-        "https://api.telegram.org/bot"
-        + TELEGRAM_BOT_TOKEN
-        + "/sendMessage"
-    )
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
     payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
+        "chat_id": CHAT_ID,
         "text": text,
+        "parse_mode": "HTML",
         "disable_web_page_preview": True
     }
 
-    data = json.dumps(payload).encode("utf-8")
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
     req = urllib.request.Request(
         url,
@@ -130,207 +113,82 @@ def send_telegram(text):
     )
 
     try:
-
         with urllib.request.urlopen(req, timeout=15) as response:
             response.read()
-
+        print("Telegram: Delivered")
         return True
-
     except Exception as e:
-
-        print("Telegram error:", e)
-
+        print("Telegram Error:", e)
         return False
 
 
 # ============================================================
-# FILE LOG
+# 6) BINANCE TICKERS
 # ============================================================
 
-def load_signal_log():
+def get_tickers():
+    return get_json(BINANCE + "/fapi/v1/ticker/24hr")
 
-    if not os.path.exists(SIGNAL_LOG_FILE):
-        return []
 
+# ============================================================
+# 7) SELECT LIQUID SYMBOLS
+# ============================================================
+
+def get_symbols():
     try:
-
-        with open(
-            SIGNAL_LOG_FILE,
-            "r",
-            encoding="utf-8"
-        ) as f:
-
-            return json.load(f)
-
-    except Exception:
-
-        return []
-
-
-def save_signal(signal):
-
-    logs = load_signal_log()
-
-    logs.append(signal)
-
-    # نحتفظ بآخر 5000 إشارة
-    logs = logs[-5000:]
-
-    with open(
-        SIGNAL_LOG_FILE,
-        "w",
-        encoding="utf-8"
-    ) as f:
-
-        json.dump(
-            logs,
-            f,
-            ensure_ascii=False,
-            indent=2
-        )
-
-
-# ============================================================
-# BINANCE EXCHANGE INFO
-# ============================================================
-
-def get_futures_symbols():
-
-    url = BINANCE_FAPI + "/fapi/v1/exchangeInfo"
-
-    data = http_get(url)
-
-    symbols = []
-
-    for s in data.get("symbols", []):
-
-        symbol = s.get("symbol")
-
-        if not symbol:
-            continue
-
-        if not symbol.endswith("USDT"):
-            continue
-
-        if symbol in EXCLUDED:
-            continue
-
-        if s.get("status") != "TRADING":
-            continue
-
-        if s.get("contractType") != "PERPETUAL":
-            continue
-
-        symbols.append(symbol)
-
-    return symbols
-
-
-# ============================================================
-# 24H TICKERS
-# ============================================================
-
-def get_24h_tickers():
-
-    url = BINANCE_FAPI + "/fapi/v1/ticker/24hr"
-
-    return http_get(url)
-
-
-# ============================================================
-# SELECT LIQUID COINS
-# ============================================================
-
-def select_symbols():
-
-    try:
-
-        tickers = get_24h_tickers()
-
-        candidates = []
+        tickers = get_tickers()
+        result = []
 
         for t in tickers:
-
             symbol = t.get("symbol", "")
-
             if not symbol.endswith("USDT"):
                 continue
-
             if symbol in EXCLUDED:
                 continue
 
             try:
-
-                volume = float(
-                    t.get("quoteVolume", 0)
-                )
-
-                price_change = float(
-                    t.get("priceChangePercent", 0)
-                )
-
-            except Exception:
-
+                volume = float(t.get("quoteVolume", 0))
+                change = float(t.get("priceChangePercent", 0))
+            except:
                 continue
 
             if volume < MIN_QUOTE_VOLUME:
                 continue
 
-            candidates.append(
-                {
-                    "symbol": symbol,
-                    "volume": volume,
-                    "change": price_change,
-                }
-            )
+            result.append({
+                "symbol": symbol,
+                "volume": volume,
+                "change": change
+            })
 
-        # ترتيب السيولة
-        candidates.sort(
-            key=lambda x: x["volume"],
-            reverse=True
-        )
-
-        return [
-            x["symbol"]
-            for x in candidates[:MAX_SYMBOLS]
-        ]
+        # ترتيب حسب السيولة
+        result.sort(key=lambda x: x["volume"], reverse=True)
+        return [x["symbol"] for x in result[:MAX_SYMBOLS]]
 
     except Exception as e:
-
-        print("Symbol scanner error:", e)
-
+        print("Symbol Error:", e)
         return []
 
 
 # ============================================================
-# KLINES
+# 8) KLINES
 # ============================================================
 
-def get_klines(symbol, interval, limit=250):
-
-    params = urllib.parse.urlencode(
-        {
-            "symbol": symbol,
-            "interval": interval,
-            "limit": limit,
-        }
-    )
-
-    url = (
-        BINANCE_FAPI
-        + "/fapi/v1/klines?"
-        + params
-    )
-
-    return http_get(url)
+def get_klines(symbol, interval, limit=220):
+    params = urllib.parse.urlencode({
+        "symbol": symbol,
+        "interval": interval,
+        "limit": limit
+    })
+    url = f"{BINANCE}/fapi/v1/klines?{params}"
+    return get_json(url)
 
 
 # ============================================================
-# FLOAT DATA
+# 9) CANDLE DATA
 # ============================================================
 
-def candle_data(klines):
-
+def parse_klines(klines):
     opens = []
     highs = []
     lows = []
@@ -338,54 +196,37 @@ def candle_data(klines):
     volumes = []
 
     for k in klines:
-
         opens.append(float(k[1]))
         highs.append(float(k[2]))
         lows.append(float(k[3]))
         closes.append(float(k[4]))
         volumes.append(float(k[5]))
 
-    return (
-        opens,
-        highs,
-        lows,
-        closes,
-        volumes
-    )
+    return opens, highs, lows, closes, volumes
 
 
 # ============================================================
-# EMA
+# 10) EMA
 # ============================================================
 
-def ema(values, period):
-
+def EMA(values, period):
     if len(values) < period:
         return None
 
     multiplier = 2 / (period + 1)
-
-    result = sum(
-        values[:period]
-    ) / period
+    result = sum(values[:period]) / period
 
     for price in values[period:]:
-
-        result = (
-            (price - result)
-            * multiplier
-            + result
-        )
+        result = (price - result) * multiplier + result
 
     return result
 
 
 # ============================================================
-# RSI
+# 11) RSI
 # ============================================================
 
-def rsi(values, period=14):
-
+def RSI(values, period=14):
     if len(values) <= period:
         return None
 
@@ -393,639 +234,492 @@ def rsi(values, period=14):
     losses = []
 
     for i in range(1, len(values)):
-
         change = values[i] - values[i - 1]
+        gains.append(max(change, 0))
+        losses.append(max(-change, 0))
 
-        gains.append(
-            max(change, 0)
-        )
-
-        losses.append(
-            max(-change, 0)
-        )
-
-    avg_gain = (
-        sum(gains[:period]) / period
-    )
-
-    avg_loss = (
-        sum(losses[:period]) / period
-    )
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
 
     for i in range(period, len(gains)):
-
-        avg_gain = (
-            (avg_gain * (period - 1))
-            + gains[i]
-        ) / period
-
-        avg_loss = (
-            (avg_loss * (period - 1))
-            + losses[i]
-        ) / period
+        avg_gain = ((avg_gain * (period - 1)) + gains[i]) / period
+        avg_loss = ((avg_loss * (period - 1)) + losses[i]) / period
 
     if avg_loss == 0:
         return 100
 
     rs = avg_gain / avg_loss
-
-    return 100 - (
-        100 / (1 + rs)
-    )
+    return 100 - (100 / (1 + rs))
 
 
 # ============================================================
-# ATR
+# 12) ATR
 # ============================================================
 
-def atr(highs, lows, closes, period=14):
-
+def ATR(highs, lows, closes, period=14):
     if len(closes) <= period:
         return None
 
     trs = []
-
     for i in range(1, len(closes)):
-
         tr = max(
             highs[i] - lows[i],
-            abs(
-                highs[i]
-                - closes[i - 1]
-            ),
-            abs(
-                lows[i]
-                - closes[i - 1]
-            )
+            abs(highs[i] - closes[i - 1]),
+            abs(lows[i] - closes[i - 1])
         )
-
         trs.append(tr)
 
-    return (
-        sum(trs[-period:])
-        / period
-    )
+    return sum(trs[-period:]) / period
 
 
 # ============================================================
-# MACD
+# 13) MACD
 # ============================================================
 
-def macd(values):
-
-    if len(values) < 35:
+def MACD(values):
+    if len(values) < 50:
         return None, None
 
-    fast = []
-    slow = []
-
-    for i in range(len(values)):
-
-        fast.append(
-            ema(
-                values[:i + 1],
-                12
-            )
-        )
-
-        slow.append(
-            ema(
-                values[:i + 1],
-                26
-            )
-        )
-
     macd_values = []
-
-    for f, s in zip(fast, slow):
-
-        if f is not None and s is not None:
-            macd_values.append(f - s)
+    for i in range(len(values)):
+        e12 = EMA(values[:i + 1], 12)
+        e26 = EMA(values[:i + 1], 26)
+        if e12 is not None and e26 is not None:
+            macd_values.append(e12 - e26)
 
     if len(macd_values) < 9:
         return None, None
 
-    signal = ema(
-        macd_values,
-        9
-    )
+    signal = EMA(macd_values, 9)
+    if signal is None:
+        return None, None
 
     return macd_values[-1], signal
 
 
 # ============================================================
-# VWAP
+# 14) VWAP
 # ============================================================
 
-def vwap(klines):
-
+def VWAP(klines):
     total_volume = 0
     total_value = 0
 
     for k in klines:
-
         high = float(k[2])
         low = float(k[3])
         close = float(k[4])
         volume = float(k[5])
 
-        typical_price = (
-            high + low + close
-        ) / 3
-
-        total_value += (
-            typical_price * volume
-        )
-
+        typical = (high + low + close) / 3
+        total_value += typical * volume
         total_volume += volume
 
     if total_volume == 0:
         return None
 
-    return (
-        total_value
-        / total_volume
-    )
+    return total_value / total_volume
 
 
 # ============================================================
-# VOLUME SPIKE
+# 15) VOLUME SPIKE
 # ============================================================
 
 def volume_spike(volumes, period=20):
-
     if len(volumes) < period + 1:
-        return 1.0
-
-    current = volumes[-1]
-
-    average = (
-        sum(volumes[-period-1:-1])
-        / period
-    )
-
+        return 1
+    average = sum(volumes[-period - 1:-1]) / period
     if average <= 0:
-        return 1.0
-
-    return current / average
+        return 1
+    return volumes[-1] / average
 
 
 # ============================================================
-# SUPPORT / RESISTANCE
+# 16) SUPPORT / RESISTANCE
 # ============================================================
 
-def support_resistance(
-    highs,
-    lows,
-    lookback=50
-):
-
-    recent_highs = highs[-lookback:]
-    recent_lows = lows[-lookback:]
-
-    resistance = max(recent_highs)
-    support = min(recent_lows)
-
+def support_resistance(highs, lows, lookback=60):
+    support = min(lows[-lookback:])
+    resistance = max(highs[-lookback:])
     return support, resistance
 
 
 # ============================================================
-# FUNDING
+# 17) FUNDING RATE
 # ============================================================
 
 def get_funding(symbol):
-
     try:
-
-        params = urllib.parse.urlencode(
-            {
-                "symbol": symbol,
-                "limit": 1
-            }
-        )
-
-        url = (
-            BINANCE_FAPI
-            + "/fapi/v1/fundingRate?"
-            + params
-        )
-
-        data = http_get(url)
-
+        params = urllib.parse.urlencode({
+            "symbol": symbol,
+            "limit": 1
+        })
+        url = f"{BINANCE}/fapi/v1/fundingRate?{params}"
+        data = get_json(url)
         if not data:
-            return 0.0
-
-        return float(
-            data[-1]["fundingRate"]
-        )
-
-    except Exception:
-
-        return 0.0
+            return 0
+        return float(data[-1]["fundingRate"])
+    except:
+        return 0
 
 
 # ============================================================
-# OPEN INTEREST
+# 18) OPEN INTEREST
 # ============================================================
 
 def get_open_interest(symbol):
-
     try:
-
-        params = urllib.parse.urlencode(
-            {
-                "symbol": symbol
-            }
-        )
-
-        url = (
-            BINANCE_FAPI
-            + "/fapi/v1/openInterest?"
-            + params
-        )
-
-        data = http_get(url)
-
-        return float(
-            data.get("openInterest", 0)
-        )
-
-    except Exception:
-
-        return 0.0
+        params = urllib.parse.urlencode({"symbol": symbol})
+        url = f"{BINANCE}/fapi/v1/openInterest?{params}"
+        data = get_json(url)
+        return float(data.get("openInterest", 0))
+    except:
+        return 0
 
 
 # ============================================================
-# BTC MARKET FILTER
+# 19) BTC MARKET REGIME
 # ============================================================
 
-def get_btc_context():
-
+def btc_regime():
     try:
+        klines = get_klines("BTCUSDT", "1h", 220)
+        o, h, l, c, v = parse_klines(klines)
 
-        klines = get_klines(
-            "BTCUSDT",
-            "1h",
-            220
-        )
-
-        (
-            o,
-            h,
-            l,
-            c,
-            v
-        ) = candle_data(klines)
-
-        current = c[-1]
-
-        e50 = ema(c, 50)
-        e200 = ema(c, 200)
+        price = c[-1]
+        e50 = EMA(c, 50)
+        e200 = EMA(c, 200)
 
         if not e50 or not e200:
             return "UNKNOWN"
 
-        if (
-            current > e50
-            and e50 > e200
-        ):
+        if price > e50 and e50 > e200:
             return "BULLISH"
-
-        if (
-            current < e50
-            and e50 < e200
-        ):
+        if price < e50 and e50 < e200:
             return "BEARISH"
-
-        return "NEUTRAL"
-
-    except Exception:
-
+        return "SIDEWAYS"
+    except:
         return "UNKNOWN"
 
 
 # ============================================================
-# ANALYZE TIMEFRAME
+# 20) ANALYZE ONE TIMEFRAME
 # ============================================================
 
-def analyze_timeframe(
-    symbol,
-    interval
-):
+def analyze(symbol, interval):
+    try:
+        klines = get_klines(symbol, interval, 220)
+        if len(klines) < 100:
+            return None
 
-    klines = get_klines(
-        symbol,
-        interval,
-        220
-    )
+        opens, highs, lows, closes, volumes = parse_klines(klines)
 
-    if len(klines) < 100:
-        return None
+        price = closes[-1]
+        e20 = EMA(closes, 20)
+        e50 = EMA(closes, 50)
+        e200 = EMA(closes, 200)
+        rsi = RSI(closes)
+        atr = ATR(highs, lows, closes)
+        macd, macd_signal = MACD(closes)
+        vwap = VWAP(klines[-100:])
+        vol_spike = volume_spike(volumes)
+        support, resistance = support_resistance(highs, lows)
 
-    (
-        opens,
-        highs,
-        lows,
-        closes,
-        volumes
-    ) = candle_data(klines)
+        bullish = 0
+        bearish = 0
 
-    price = closes[-1]
+        # EMA TREND
+        if e20 and e50 and e200:
+            if price > e20 and e20 > e50 and e50 > e200:
+                bullish += 20
+            elif price < e20 and e20 < e50 and e50 < e200:
+                bearish += 20
 
-    e20 = ema(closes, 20)
-    e50 = ema(closes, 50)
-    e200 = ema(closes, 200)
+        # RSI
+        if rsi is not None:
+            if 52 <= rsi <= 68:
+                bullish += 10
+            elif 32 <= rsi <= 48:
+                bearish += 10
 
-    rsi_value = rsi(closes)
+        # MACD
+        if macd is not None and macd_signal is not None:
+            if macd > macd_signal:
+                bullish += 10
+            elif macd < macd_signal:
+                bearish += 10
 
-    atr_value = atr(
-        highs,
-        lows,
-        closes
-    )
+        # VWAP
+        if vwap:
+            if price > vwap:
+                bullish += 10
+            elif price < vwap:
+                bearish += 10
 
-    macd_value, macd_signal = macd(
-        closes
-    )
+        # VOLUME
+        if vol_spike >= 1.4:
+            if price > opens[-1]:
+                bullish += 10
+            elif price < opens[-1]:
+                bearish += 10
 
-    current_vwap = vwap(
-        klines[-100:]
-    )
+        # BREAKOUT / BREAKDOWN
+        previous_high = max(highs[-11:-1])
+        previous_low = min(lows[-11:-1])
 
-    v_spike = volume_spike(
-        volumes
-    )
-
-    support, resistance = (
-        support_resistance(
-            highs,
-            lows
-        )
-    )
-
-    bullish = 0
-    bearish = 0
-
-    # ----------------------------
-    # EMA
-    # ----------------------------
-
-    if e20 and e50 and e200:
-
-        if (
-            price > e20
-            and e20 > e50
-            and e50 > e200
-        ):
+        if price > previous_high:
             bullish += 15
-
-        if (
-            price < e20
-            and e20 < e50
-            and e50 < e200
-        ):
+        if price < previous_low:
             bearish += 15
 
-    # ----------------------------
-    # RSI
-    # ----------------------------
-
-    if rsi_value is not None:
-
-        if 50 < rsi_value < 70:
-            bullish += 10
-
-        elif 30 < rsi_value < 50:
-            bearish += 10
-
-    # ----------------------------
-    # MACD
-    # ----------------------------
-
-    if (
-        macd_value is not None
-        and macd_signal is not None
-    ):
-
-        if macd_value > macd_signal:
-            bullish += 10
-
-        elif macd_value < macd_signal:
-            bearish += 10
-
-    # ----------------------------
-    # VWAP
-    # ----------------------------
-
-    if current_vwap:
-
-        if price > current_vwap:
-            bullish += 10
-
-        elif price < current_vwap:
-            bearish += 10
-
-    # ----------------------------
-    # VOLUME
-    # ----------------------------
-
-    if v_spike >= 1.5:
-
-        if price > opens[-1]:
-            bullish += 10
-
-        elif price < opens[-1]:
-            bearish += 10
-
-    # ----------------------------
-    # STRUCTURE
-    # ----------------------------
-
-    previous_high = max(
-        highs[-10:-1]
-    )
-
-    previous_low = min(
-        lows[-10:-1]
-    )
-
-    if price > previous_high:
-        bullish += 10
-
-    if price < previous_low:
-        bearish += 10
-
-    # ----------------------------
-
-    return {
-        "price": price,
-        "ema20": e20,
-        "ema50": e50,
-        "ema200": e200,
-        "rsi": rsi_value,
-        "atr": atr_value,
-        "macd": macd_value,
-        "macd_signal": macd_signal,
-        "vwap": current_vwap,
-        "volume_spike": v_spike,
-        "support": support,
-        "resistance": resistance,
-        "bullish": bullish,
-        "bearish": bearish,
-    }
+        return {
+            "price": price,
+            "ema20": e20,
+            "ema50": e50,
+            "ema200": e200,
+            "rsi": rsi,
+            "atr": atr,
+            "macd": macd,
+            "macd_signal": macd_signal,
+            "vwap": vwap,
+            "volume_spike": vol_spike,
+            "support": support,
+            "resistance": resistance,
+            "bullish": bullish,
+            "bearish": bearish
+        }
+    except Exception:
+        return None
 
 
 # ============================================================
-# SIGNAL ENGINE
+# 21) BUILD SIGNAL
 # ============================================================
+
+def format_price(val):
+    if val is None:
+        return "N/A"
+    if val >= 100:
+        return f"{val:,.2f}"
+    elif val >= 1:
+        return f"{val:.4f}"
+    else:
+        return f"{val:.6f}"
+
 
 def build_signal(symbol):
-
     try:
+        tf4h = analyze(symbol, "4h")
+        tf1h = analyze(symbol, "1h")
+        tf15 = analyze(symbol, "15m")
+        tf5 = analyze(symbol, "5m")
 
-        tf4h = analyze_timeframe(
-            symbol,
-            "4h"
-        )
-
-        tf1h = analyze_timeframe(
-            symbol,
-            "1h"
-        )
-
-        tf15 = analyze_timeframe(
-            symbol,
-            "15m"
-        )
-
-        tf5 = analyze_timeframe(
-            symbol,
-            "5m"
-        )
-
-        if not all(
-            [tf4h, tf1h, tf15, tf5]
-        ):
+        if not all([tf4h, tf1h, tf15, tf5]):
             return None
 
         funding = get_funding(symbol)
-
         oi = get_open_interest(symbol)
-
-        btc_context = get_btc_context()
+        btc = btc_regime()
 
         long_score = 0
         short_score = 0
 
-        # ====================================================
-        # 4H
-        # ====================================================
-
+        # 4H TREND
         if tf4h["bullish"] >= 25:
             long_score += 20
-
         if tf4h["bearish"] >= 25:
             short_score += 20
 
-        # ====================================================
         # 1H
-        # ====================================================
-
         if tf1h["bullish"] >= 25:
             long_score += 15
-
         if tf1h["bearish"] >= 25:
             short_score += 15
 
-        # ====================================================
         # 15M
-        # ====================================================
-
         if tf15["bullish"] >= 25:
             long_score += 15
-
         if tf15["bearish"] >= 25:
             short_score += 15
 
-        # ====================================================
-        # 5M ENTRY
-        # ====================================================
-
+        # 5M
         if tf5["bullish"] >= 25:
             long_score += 15
-
         if tf5["bearish"] >= 25:
             short_score += 15
 
-        # ====================================================
         # BTC FILTER
-        # ====================================================
-
-        if btc_context == "BULLISH":
-
+        if btc == "BULLISH":
             long_score += 10
             short_score -= 10
-
-        elif btc_context == "BEARISH":
-
+        elif btc == "BEARISH":
             short_score += 10
             long_score -= 10
 
-        # ====================================================
         # FUNDING
-        # ====================================================
-
-        # Funding موجب جدًا =
-        # ازدحام نسبي في الـ Long
         if funding > 0.0005:
-
             short_score += 5
-
-        # Funding سالب جدًا =
-        # ازدحام نسبي في الـ Short
         elif funding < -0.0005:
-
             long_score += 5
 
-        # ====================================================
         # VOLUME
-        # ====================================================
-
         if tf5["volume_spike"] >= 1.5:
-
             if tf5["price"] > tf5["vwap"]:
                 long_score += 5
-
             elif tf5["price"] < tf5["vwap"]:
                 short_score += 5
 
-        # ====================================================
-        # FINAL
-        # ====================================================
-
-        direction = None
-        score = 0
-
-        if (
-            long_score >= MIN_SCORE
-            and long_score > short_score + 8
-        ):
-
+        # SELECT DIRECTION
+        if long_score >= MIN_SCORE and long_score > short_score + 10:
             direction = "LONG"
-            score = min(
-                long_score,
-                100
-            )
-
-        elif (
-            short_score >= MIN_SCORE
-            and short_score > long_score + 8
-        ):
-
+            score = min(long_score, 100)
+        elif short_score >= MIN_SCORE and short_score > long_score + 10:
             direction = "SHORT"
-            score = min(
-                short_score,
-                100
-            )
+            score = min(short_score, 100)
+        else:
+            return None
 
-else:
+        # ENTRY / SL / TP
+        price = tf5["price"]
+        atr = tf5["atr"]
+
+        if not atr or atr <= 0:
+            return None
+
+        support = tf15["support"]
+        resistance = tf15["resistance"]
+
+        if direction == "LONG":
+            entry_low = price - (atr * 0.20)
+            entry_high = price + (atr * 0.10)
+            sl = min(support - (atr * 0.15), price - (atr * 1.5))
+            risk = price - sl
+            if risk <= 0:
+                risk = atr * 1.5
+                sl = price - risk
+            tp1 = price + (risk * 1.0)
+            tp2 = price + (risk * 2.0)
+            tp3 = price + (risk * 3.0)
+        else:
+            entry_low = price - (atr * 0.10)
+            entry_high = price + (atr * 0.20)
+            sl = max(resistance + (atr * 0.15), price + (atr * 1.5))
+            risk = sl - price
+            if risk <= 0:
+                risk = atr * 1.5
+                sl = price + risk
+            tp1 = price - (risk * 1.0)
+            tp2 = price - (risk * 2.0)
+            tp3 = price - (risk * 3.0)
+
+        return {
+            "symbol": symbol,
+            "direction": direction,
+            "score": score,
+            "price": price,
+            "entry_low": entry_low,
+            "entry_high": entry_high,
+            "sl": sl,
+            "tp1": tp1,
+            "tp2": tp2,
+            "tp3": tp3,
+            "risk": risk,
+            "btc": btc,
+            "funding": funding,
+            "oi": oi,
+            "tf15_rsi": tf15["rsi"],
+            "tf1h_rsi": tf1h["rsi"],
+            "vol_spike": tf5["volume_spike"]
+        }
+
+    except Exception as e:
+        print(f"Error building signal for {symbol}:", e)
+        return None
+
+
+# ============================================================
+# 22) FORMAT TELEGRAM MESSAGE
+# ============================================================
+
+def format_signal_card(sig):
+    direction = sig["direction"]
+    icon = "🟢" if direction == "LONG" else "🔴"
+    arrow = "📈" if direction == "LONG" else "📉"
+
+    text = (
+        f"🚨 <b>ABED FUTURES RADAR | إشارة جديدة</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"💎 <b>العملة:</b> #{sig['symbol']}\n"
+        f"{icon} <b>الاتجاه:</b> <b>{direction}</b> {arrow}\n"
+        f"⭐ <b>قوة الإشارة:</b> {sig['score']}/100\n"
+        f"💵 <b>السعر الحالي:</b> {format_price(sig['price'])}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🎯 <b>نطاق الدخول المقترح:</b>\n"
+        f"   <code>{format_price(sig['entry_low'])}</code> ➔ <code>{format_price(sig['entry_high'])}</code>\n\n"
+        f"🛑 <b>وقف الخسارة (SL):</b>\n"
+        f"   <code>{format_price(sig['sl'])}</code>\n\n"
+        f"🎯 <b>الأهداف (Take Profit):</b>\n"
+        f"   TP1 (1.0R): <code>{format_price(sig['tp1'])}</code>\n"
+        f"   TP2 (2.0R): <code>{format_price(sig['tp2'])}</code>\n"
+        f"   TP3 (3.0R): <code>{format_price(sig['tp3'])}</code>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📊 <b>بيانات السوق:</b>\n"
+        f"• حالة البيتكوين: <b>{sig['btc']}</b>\n"
+        f"• Funding Rate: <code>{sig['funding']:.6f}</code>\n"
+        f"• RSI (15m): <code>{sig['tf15_rsi']:.1f if sig['tf15_rsi'] else 'N/A'}</code>\n"
+        f"• RSI (1h): <code>{sig['tf1h_rsi']:.1f if sig['tf1h_rsi'] else 'N/A'}</code>\n"
+        f"• انبعاث الحجم (5m): <code>{sig['vol_spike']:.2f}x</code>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"⏰ {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}\n"
+        f"⚠️ <i>تنبيه فقط - ليست نصيحة مالية</i>"
+    )
+    return text
+
+
+def format_news_card(cycle_num, btc_status, symbols_count):
+    return (
+        f"📡 <b>ABED RADAR | تقرير حالة الرادار</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🔄 الدورة رقم: #{cycle_num}\n"
+        f"🔍 عدد العملات المفحوصة: {symbols_count}\n"
+        f"👑 اتجاه BTC الرئيسي: <b>{btc_status}</b>\n"
+        f"⚡ حالة المسح: يعمل بنشاط 🟢\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"⏰ {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}"
+    )
+
+
+# ============================================================
+# 23) MAIN SCANNER LOOP
+# ============================================================
+
+def scan():
+    print("=" * 60)
+    print("🚀 ABED FUTURES RADAR - V2 Started...")
+    print("=" * 60)
+
+    cycle = 0
+
+    while True:
+        cycle += 1
+        start_time = time.time()
+        print(f"\n[Cycle #{cycle}] Starting market scan at {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}...")
+
+        symbols = get_symbols()
+        print(f"[Cycle #{cycle}] Selected top {len(symbols)} liquid USDT-M pairs.")
+
+        btc = btc_regime()
+        print(f"[Cycle #{cycle}] Bitcoin Market Regime: {btc}")
+
+        # تقرير دوري كل NEWS_EVERY دورة
+        if cycle % NEWS_EVERY == 0:
+            news_text = format_news_card(cycle, btc, len(symbols))
+            send_telegram(news_text)
+
+        signals_found = 0
+
+        for symbol in symbols:
+            now = time.time()
+            # فحص فترة الانتظار (Cooldown) لتجنب تكرار نفس العملة
+            if symbol in last_signal_time:
+                if now - last_signal_time[sy
