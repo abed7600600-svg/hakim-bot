@@ -1,57 +1,40 @@
-# ============================================================
-# ABED BTRUSDT LIVE PnL TRACKER & PROFIT CALCULATOR (10s)
-# حساب الأرباح والخسائر المباشرة بالدولار والنسبة بدقة متناهية
-# ============================================================
-
 from datetime import datetime, timezone
 import json
 import time
 import urllib.request
-import urllib.parse
 import xml.etree.ElementTree as ET
-import re
+import html
 import ssl
-import os
 
-# ============================================================
-# 1) إعدادات التلجرام ومعلومات الصفقة المباشرة من بينانس
-# ============================================================
 BOT_TOKEN = "8641484254:AAGs6MFyxo52A_Y2bkznogpZ9-s9g6NbjXk"
 CHAT_ID = "8493446835"
-
-# التحديث كل 10 ثوانٍ
 SCAN_SECONDS = 10
 
-# بيانات صفقتك الدقيقة من بينانس
 TARGET_SYMBOL = "BTRUSDT"
-MY_ENTRY_PRICE = 0.1270354       # سعر الدخول
-POSITION_SIZE_USDT = 98.18       # حجم الصفقة الكلي
-MARGIN_USDT = 9.77               # الهامش المحجوز (رأس المال المستثمر)
-MY_LIQ_PRICE = 0.2083998         # سعر التصفية
-MY_TP_PRICE = 0.0504800          # هدف جني الأرباح
-LEVERAGE = 10                    # الرافعة المالية 10x
+MY_ENTRY_PRICE = 0.1270354
+POSITION_SIZE_USDT = 98.18
+MARGIN_USDT = 9.77
+MY_LIQ_PRICE = 0.2083998
+MY_TP_PRICE = 0.0504800
+LEVERAGE = 10
 
-# عدد عملات BTR في صفقتك
-COIN_QTY = POSITION_SIZE_USDT / MY_ENTRY_PRICE  # ~772.855 BTR
+COIN_QTY = POSITION_SIZE_USDT / MY_ENTRY_PRICE
 
 ssl_ctx = ssl.create_default_context()
-ssl_ctx.check_hostname = False
-ssl_ctx.verify_mode = ssl.CERT_NONE
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
     "Accept": "application/json, text/xml, */*"
 }
 
-def clean_html(raw_html):
-    if not raw_html:
+def escape_html(text):
+    if not text:
         return ""
-    cleanr = re.compile('<.*?>')
-    cleantext = re.sub(cleanr, '', raw_html)
-    return cleantext.replace('&quot;', '"').replace('&amp;', '&').replace('&nbsp;', ' ').strip()
+    return html.escape(str(text))
 
 def send_telegram(text):
     if not BOT_TOKEN or not CHAT_ID:
+        print("❌ خطأ: BOT_TOKEN أو CHAT_ID غير محدد.")
         return False
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {
@@ -67,19 +50,23 @@ def send_telegram(text):
         headers={"Content-Type": "application/json", **HEADERS}
     )
     try:
-        with urllib.request.urlopen(req, timeout=8, context=ssl_ctx) as response:
+        with urllib.request.urlopen(req, timeout=10, context=ssl_ctx) as response:
             response.read()
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ تم إرسال تقرير الأرباح والخسائر المباشر")
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ تم إرسال التقرير لتليجرام بنجاح")
         return True
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode('utf-8', errors='ignore')
+        print(f"❌ خطأ تليجرام ({e.code}): {error_body}")
+        return False
     except Exception as e:
-        print(f"❌ خطأ تليجرام: {e}")
+        print(f"❌ خطأ اتصال تليجرام: {e}")
         return False
 
 def get_btr_live():
     try:
         url = f"https://fapi.binance.com/fapi/v1/ticker/24hr?symbol={TARGET_SYMBOL}"
         req = urllib.request.Request(url, headers=HEADERS)
-        with urllib.request.urlopen(req, timeout=6, context=ssl_ctx) as resp:
+        with urllib.request.urlopen(req, timeout=8, context=ssl_ctx) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             return {
                 "price": float(data.get("lastPrice", 0)),
@@ -88,18 +75,19 @@ def get_btr_live():
                 "low": float(data.get("lowPrice", 0)),
                 "volume": float(data.get("quoteVolume", 0))
             }
-    except Exception:
+    except Exception as e:
+        print(f"❌ خطأ جلب سعر بينانس: {e}")
         return None
 
 def get_btr_klines():
     try:
         url = f"https://fapi.binance.com/fapi/v1/klines?symbol={TARGET_SYMBOL}&interval=15m&limit=40"
         req = urllib.request.Request(url, headers=HEADERS)
-        with urllib.request.urlopen(req, timeout=6, context=ssl_ctx) as resp:
+        with urllib.request.urlopen(req, timeout=8, context=ssl_ctx) as resp:
             klines = json.loads(resp.read().decode("utf-8"))
-            closes = [float(k[4]) for k in klines]
-            return closes
-    except Exception:
+            return [float(k[4]) for k in klines]
+    except Exception as e:
+        print(f"⚠️ خطأ جلب الشموع (سيتم تخطي RSI): {e}")
         return []
 
 def calculate_rsi(closes, period=14):
@@ -124,19 +112,16 @@ def get_latest_news():
     try:
         url = "https://ar.cointelegraph.com/rss"
         req = urllib.request.Request(url, headers=HEADERS)
-        with urllib.request.urlopen(req, timeout=5, context=ssl_ctx) as resp:
+        with urllib.request.urlopen(req, timeout=6, context=ssl_ctx) as resp:
             root = ET.fromstring(resp.read())
             item = root.find(".//item")
             if item is not None:
                 title = item.find("title").text if item.find("title") is not None else ""
-                return clean_html(title)
-    except Exception:
-        pass
+                return escape_html(title.strip())
+    except Exception as e:
+        print(f"⚠️ خطأ جلب الأخبار: {e}")
     return "حركة السوق مستقرة بانتظار السيولة."
 
-# ============================================================
-# 2) حساب كل تفاصيل الربح والخسارة لحظة بلحظة
-# ============================================================
 def build_live_pnl_report():
     data = get_btr_live()
     if not data:
@@ -146,20 +131,15 @@ def build_live_pnl_report():
     closes = get_btr_klines()
     rsi_val = calculate_rsi(closes) if closes else 50.0
 
-    # 1. حساب الربح أو الخسارة الحالية بالدولار والنسبة
     pnl_usdt = COIN_QTY * (MY_ENTRY_PRICE - cur_price)
     pnl_percent = (pnl_usdt / MARGIN_USDT) * 100
 
-    # 2. حساب الربح الصافي عند وصول السعر للهدف (0.05048)
     profit_at_tp_usdt = COIN_QTY * (MY_ENTRY_PRICE - MY_TP_PRICE)
     profit_at_tp_percent = (profit_at_tp_usdt / MARGIN_USDT) * 100
 
-    # 3. المسافة لسعر التصفية والهدف ونقطة التعادل
     dist_to_liq_percent = ((MY_LIQ_PRICE - cur_price) / cur_price) * 100
-    dist_to_tp_percent = ((cur_price - MY_TP_PRICE) / cur_price) * 100
     dist_to_breakeven_percent = ((cur_price - MY_ENTRY_PRICE) / cur_price) * 100
 
-    # تنسيق عرض الأرباح والخسائر
     if pnl_usdt >= 0:
         pnl_display = f"🟢 <b>ربح حالي:</b> <code>+{pnl_usdt:.2f} USDT</code> (<code>+{pnl_percent:.1f}%</code>)"
         status_banner = "🎉 <b>أنت في منطقة الأرباح الآن!</b>"
@@ -167,7 +147,6 @@ def build_live_pnl_report():
         pnl_display = f"🔴 <b>خسارة عائمة:</b> <code>{pnl_usdt:.2f} USDT</code> (<code>{pnl_percent:.1f}%</code>)"
         status_banner = "⏳ <b>في انتظار ارتداد السعر لأسفل نحو الدخول...</b>"
 
-    # التوقع الفني للوصول للهدف
     if rsi_val > 65:
         rsi_status = "تشبع شرائي 🟢 (السعر جاهز للهبوط لمصلحتك)"
     elif rsi_val < 35:
@@ -206,22 +185,21 @@ def build_live_pnl_report():
     )
     return report
 
-# ============================================================
-# 3) تشغيل البث
-# ============================================================
 def run_live_pnl_bot():
-    print("🚀 بدء المتابعة الحية وحساب الأرباح والخسائر لـ BTR كل 10 ثوانٍ...")
+    print("🚀 بدء المتابعة الحية لصفقة BTR...")
     send_telegram(
         "🟢 <b>تم تفعيل رادار الأرباح اللحظية لعملة BTRUSDT!</b>\n\n"
-        "📡 <i>ستصلك الآن الأرباح والخسائر بالدولار والنسبة بدقة متناهية كل 10 ثوانٍ دون الحاجة لفتح المنصة.</i>"
+        "📡 <i>ستصلك الآن الأرباح والخسائر بالدولار والنسبة بدقة متناهية.</i>"
     )
     while True:
         try:
             msg = build_live_pnl_report()
             if msg:
                 send_telegram(msg)
+            else:
+                print("⚠️ تعذر إنشاء التقرير في هذه الدورة.")
         except Exception as e:
-            print(f"خطأ أثناء التحديث: {e}")
+            print(f"❌ خطأ أثناء التحديث: {e}")
         time.sleep(SCAN_SECONDS)
 
 if __name__ == "__main__":
