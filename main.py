@@ -24,7 +24,6 @@ import os
 # ============================================================
 # 1) TELEGRAM
 # ============================================================
-# ضع التوكن والـ Chat ID هنا أو عبر متغيرات البيئة (Environment Variables)
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "PUT_NEW_BOT_TOKEN_HERE")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "PUT_CHAT_ID_HERE")
 
@@ -43,11 +42,8 @@ MAX_SYMBOLS = 70
 # أقل حجم تداول 24 ساعة
 MIN_QUOTE_VOLUME = 5_000_000
 
-# منع تكرار نفس العملة ونفس الاتجاه (بالثواني: 1800 = نصف ساعة)
+# منع تكرار نفس العملة ونفس الاتجاه (بالثواني)
 SIGNAL_COOLDOWN = 1800
-
-# تقرير حالة الرادار كل 10 دورات مسح
-NEWS_EVERY = 10
 
 # ============================================================
 # 3) BINANCE FUTURES
@@ -90,7 +86,7 @@ def send_telegram(text):
         or not CHAT_ID
         or CHAT_ID == "PUT_CHAT_ID_HERE"
     ):
-        print("ضع BOT_TOKEN و CHAT_ID أولاً")
+        print("⚠️ يرجى ضبط BOT_TOKEN و CHAT_ID في Secrets أو كمتغيرات بيئة")
         return False
 
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -107,18 +103,16 @@ def send_telegram(text):
     req = urllib.request.Request(
         url,
         data=data,
-        headers={
-            "Content-Type": "application/json"
-        }
+        headers={"Content-Type": "application/json"}
     )
 
     try:
         with urllib.request.urlopen(req, timeout=15) as response:
             response.read()
-        print("Telegram: Delivered")
+        print("✅ Telegram: Delivered")
         return True
     except Exception as e:
-        print("Telegram Error:", e)
+        print(f"❌ Telegram Error: {e}")
         return False
 
 
@@ -149,7 +143,7 @@ def get_symbols():
             try:
                 volume = float(t.get("quoteVolume", 0))
                 change = float(t.get("priceChangePercent", 0))
-            except:
+            except Exception:
                 continue
 
             if volume < MIN_QUOTE_VOLUME:
@@ -166,7 +160,7 @@ def get_symbols():
         return [x["symbol"] for x in result[:MAX_SYMBOLS]]
 
     except Exception as e:
-        print("Symbol Error:", e)
+        print(f"Symbol Error: {e}")
         return []
 
 
@@ -189,19 +183,13 @@ def get_klines(symbol, interval, limit=220):
 # ============================================================
 
 def parse_klines(klines):
-    opens = []
-    highs = []
-    lows = []
-    closes = []
-    volumes = []
-
+    opens, highs, lows, closes, volumes = [], [], [], [], []
     for k in klines:
-        opens.append(float(k[1]))
+        opens.append(float(k))
         highs.append(float(k[2]))
         lows.append(float(k[3]))
         closes.append(float(k[4]))
         volumes.append(float(k[5]))
-
     return opens, highs, lows, closes, volumes
 
 
@@ -212,13 +200,10 @@ def parse_klines(klines):
 def EMA(values, period):
     if len(values) < period:
         return None
-
     multiplier = 2 / (period + 1)
     result = sum(values[:period]) / period
-
     for price in values[period:]:
-        result = (price - result) * multiplier + result
-
+        result = ((price - result) * multiplier) + result
     return result
 
 
@@ -229,10 +214,7 @@ def EMA(values, period):
 def RSI(values, period=14):
     if len(values) <= period:
         return None
-
-    gains = []
-    losses = []
-
+    gains, losses = [], []
     for i in range(1, len(values)):
         change = values[i] - values[i - 1]
         gains.append(max(change, 0))
@@ -259,7 +241,6 @@ def RSI(values, period=14):
 def ATR(highs, lows, closes, period=14):
     if len(closes) <= period:
         return None
-
     trs = []
     for i in range(1, len(closes)):
         tr = max(
@@ -268,7 +249,6 @@ def ATR(highs, lows, closes, period=14):
             abs(lows[i] - closes[i - 1])
         )
         trs.append(tr)
-
     return sum(trs[-period:]) / period
 
 
@@ -304,20 +284,17 @@ def MACD(values):
 def VWAP(klines):
     total_volume = 0
     total_value = 0
-
     for k in klines:
         high = float(k[2])
         low = float(k[3])
         close = float(k[4])
         volume = float(k[5])
-
         typical = (high + low + close) / 3
-        total_value += typical * volume
+        total_value += (typical * volume)
         total_volume += volume
 
     if total_volume == 0:
         return None
-
     return total_value / total_volume
 
 
@@ -350,16 +327,13 @@ def support_resistance(highs, lows, lookback=60):
 
 def get_funding(symbol):
     try:
-        params = urllib.parse.urlencode({
-            "symbol": symbol,
-            "limit": 1
-        })
+        params = urllib.parse.urlencode({"symbol": symbol, "limit": 1})
         url = f"{BINANCE}/fapi/v1/fundingRate?{params}"
         data = get_json(url)
         if not data:
             return 0
         return float(data[-1]["fundingRate"])
-    except:
+    except Exception:
         return 0
 
 
@@ -373,7 +347,7 @@ def get_open_interest(symbol):
         url = f"{BINANCE}/fapi/v1/openInterest?{params}"
         data = get_json(url)
         return float(data.get("openInterest", 0))
-    except:
+    except Exception:
         return 0
 
 
@@ -384,8 +358,7 @@ def get_open_interest(symbol):
 def btc_regime():
     try:
         klines = get_klines("BTCUSDT", "1h", 220)
-        o, h, l, c, v = parse_klines(klines)
-
+        _, _, _, c, _ = parse_klines(klines)
         price = c[-1]
         e50 = EMA(c, 50)
         e200 = EMA(c, 200)
@@ -398,7 +371,7 @@ def btc_regime():
         if price < e50 and e50 < e200:
             return "BEARISH"
         return "SIDEWAYS"
-    except:
+    except Exception:
         return "UNKNOWN"
 
 
@@ -409,15 +382,16 @@ def btc_regime():
 def analyze(symbol, interval):
     try:
         klines = get_klines(symbol, interval, 220)
-        if len(klines) < 100:
+        if not klines or len(klines) < 100:
             return None
 
         opens, highs, lows, closes, volumes = parse_klines(klines)
-
         price = closes[-1]
+
         e20 = EMA(closes, 20)
         e50 = EMA(closes, 50)
         e200 = EMA(closes, 200)
+
         rsi = RSI(closes)
         atr = ATR(highs, lows, closes)
         macd, macd_signal = MACD(closes)
@@ -488,7 +462,7 @@ def analyze(symbol, interval):
             "bullish": bullish,
             "bearish": bearish
         }
-    except Exception:
+    except Exception as e:
         return None
 
 
@@ -496,19 +470,9 @@ def analyze(symbol, interval):
 # 21) BUILD SIGNAL
 # ============================================================
 
-def format_price(val):
-    if val is None:
-        return "N/A"
-    if val >= 100:
-        return f"{val:,.2f}"
-    elif val >= 1:
-        return f"{val:.4f}"
-    else:
-        return f"{val:.6f}"
-
-
 def build_signal(symbol):
     try:
+        # Multi Time Frame
         tf4h = analyze(symbol, "4h")
         tf1h = analyze(symbol, "1h")
         tf15 = analyze(symbol, "15m")
@@ -623,103 +587,72 @@ def build_signal(symbol):
             "tp1": tp1,
             "tp2": tp2,
             "tp3": tp3,
-            "risk": risk,
             "btc": btc,
             "funding": funding,
-            "oi": oi,
-            "tf15_rsi": tf15["rsi"],
-            "tf1h_rsi": tf1h["rsi"],
-            "vol_spike": tf5["volume_spike"]
+            "oi": oi
         }
-
     except Exception as e:
-        print(f"Error building signal for {symbol}:", e)
+        print(f"Error building signal for {symbol}: {e}")
         return None
 
 
 # ============================================================
-# 22) FORMAT TELEGRAM MESSAGE
+# 22) FORMAT & SEND ALERT
 # ============================================================
 
-def format_signal_card(sig):
-    direction = sig["direction"]
-    icon = "🟢" if direction == "LONG" else "🔴"
-    arrow = "📈" if direction == "LONG" else "📉"
-
+def format_alert(signal):
+    dir_emoji = "🟢 LONG" if signal["direction"] == "LONG" else "🔴 SHORT"
     text = (
-        f"🚨 <b>ABED FUTURES RADAR | إشارة جديدة</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"💎 <b>العملة:</b> #{sig['symbol']}\n"
-        f"{icon} <b>الاتجاه:</b> <b>{direction}</b> {arrow}\n"
-        f"⭐ <b>قوة الإشارة:</b> {sig['score']}/100\n"
-        f"💵 <b>السعر الحالي:</b> {format_price(sig['price'])}\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"🎯 <b>نطاق الدخول المقترح:</b>\n"
-        f"   <code>{format_price(sig['entry_low'])}</code> ➔ <code>{format_price(sig['entry_high'])}</code>\n\n"
-        f"🛑 <b>وقف الخسارة (SL):</b>\n"
-        f"   <code>{format_price(sig['sl'])}</code>\n\n"
-        f"🎯 <b>الأهداف (Take Profit):</b>\n"
-        f"   TP1 (1.0R): <code>{format_price(sig['tp1'])}</code>\n"
-        f"   TP2 (2.0R): <code>{format_price(sig['tp2'])}</code>\n"
-        f"   TP3 (3.0R): <code>{format_price(sig['tp3'])}</code>\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📊 <b>بيانات السوق:</b>\n"
-        f"• حالة البيتكوين: <b>{sig['btc']}</b>\n"
-        f"• Funding Rate: <code>{sig['funding']:.6f}</code>\n"
-        f"• RSI (15m): <code>{sig['tf15_rsi']:.1f if sig['tf15_rsi'] else 'N/A'}</code>\n"
-        f"• RSI (1h): <code>{sig['tf1h_rsi']:.1f if sig['tf1h_rsi'] else 'N/A'}</code>\n"
-        f"• انبعاث الحجم (5m): <code>{sig['vol_spike']:.2f}x</code>\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"⏰ {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}\n"
-        f"⚠️ <i>تنبيه فقط - ليست نصيحة مالية</i>"
+        f"🚨 <b>ABED FUTURES RADAR V2</b> 🚨\n\n"
+        f"🪙 <b>العملة:</b> #{signal['symbol']}\n"
+        f"📊 <b>الاتجاه:</b> {dir_emoji}\n"
+        f"⭐ <b>قوة الإشارة:</b> {signal['score']}/100\n"
+        f"💵 <b>السعر الحالي:</b> <code>{signal['price']:.4f}</code>\n\n"
+        f"🎯 <b>منطقة الدخول:</b> <code>{signal['entry_low']:.4f}</code> - <code>{signal['entry_high']:.4f}</code>\n"
+        f"🛑 <b>وقف الخسارة (SL):</b> <code>{signal['sl']:.4f}</code>\n"
+        f"🎯 <b>الهدف الأول (TP1):</b> <code>{signal['tp1']:.4f}</code>\n"
+        f"🎯 <b>الهدف الثاني (TP2):</b> <code>{signal['tp2']:.4f}</code>\n"
+        f"🎯 <b>الهدف الثالث (TP3):</b> <code>{signal['tp3']:.4f}</code>\n\n"
+        f"🌐 <b>حالة البيتكوين:</b> {signal['btc']}\n"
+        f"📈 <b>Funding Rate:</b> {signal['funding']:.5%}\n"
+        f"⏰ <b>الوقت:</b> {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}"
     )
     return text
 
 
-def format_news_card(cycle_num, btc_status, symbols_count):
-    return (
-        f"📡 <b>ABED RADAR | تقرير حالة الرادار</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"🔄 الدورة رقم: #{cycle_num}\n"
-        f"🔍 عدد العملات المفحوصة: {symbols_count}\n"
-        f"👑 اتجاه BTC الرئيسي: <b>{btc_status}</b>\n"
-        f"⚡ حالة المسح: يعمل بنشاط 🟢\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"⏰ {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}"
-    )
-
-
 # ============================================================
-# 23) MAIN SCANNER LOOP
+# 23) MAIN SCAN LOOP
 # ============================================================
 
-def scan():
-    print("=" * 60)
-    print("🚀 ABED FUTURES RADAR - V2 Started...")
-    print("=" * 60)
+def scan_once():
+    symbols = get_symbols()
+    print(f"🔍 فحص {len(symbols)} عملة نشطة...")
 
-    cycle = 0
+    for symbol in symbols:
+        now = time.time()
+        # Cooldown check
+        if symbol in last_signal_time:
+            if now - last_signal_time[symbol] < SIGNAL_COOLDOWN:
+                continue
 
+        signal = build_signal(symbol)
+        if signal:
+            msg = format_alert(signal)
+            print(f"🔥 إشارة مكتشفة: {symbol} - {signal['direction']} ({signal['score']} pts)")
+            send_telegram(msg)
+            last_signal_time[symbol] = now
+
+
+def run_radar():
+    print("🚀 بدء تشغيل Abed Futures Radar V2...")
     while True:
-        cycle += 1
-        start_time = time.time()
-        print(f"\n[Cycle #{cycle}] Starting market scan at {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}...")
+        try:
+            scan_once()
+        except Exception as e:
+            print(f"Error in scan cycle: {e}")
+        time.sleep(SCAN_SECONDS)
 
-        symbols = get_symbols()
-        print(f"[Cycle #{cycle}] Selected top {len(symbols)} liquid USDT-M pairs.")
 
-        btc = btc_regime()
-        print(f"[Cycle #{cycle}] Bitcoin Market Regime: {btc}")
-
-        # تقرير دوري كل NEWS_EVERY دورة
-        if cycle % NEWS_EVERY == 0:
-            news_text = format_news_card(cycle, btc, len(symbols))
-            send_telegram(news_text)
-
-        signals_found = 0
-
-        for symbol in symbols:
-            now = time.time()
-            # فحص فترة الانتظار (Cooldown) لتجنب تكرار نفس العملة
-            if symbol in last_signal_time:
-                if now - last_signal_time[sy
+if __name__ == "__main__":
+    run_radar()
+            
