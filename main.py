@@ -1,47 +1,74 @@
-import os
+# ============================================================
+# ABED LIVE RADAR & GLOBAL CRYPTO NEWS STREAM
+# Binance USD-M Futures + Real-Time Global Crypto News
+# ============================================================
+
+from datetime import datetime, timezone
 import json
 import time
 import urllib.request
 import urllib.parse
-from datetime import datetime, timezone
+import os
 
 # ============================================================
-# 1) بيانات تليجرام المباشرة
+# 1) إعدادات التلجرام
 # ============================================================
-BOT_TOKEN = "8641484254:AAGs6MFyxo52A_Y2bkznogpZ9-s9g6NbjXk"
-CHAT_ID = "8493446835"
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8641484254:AAGs6MFyxo52A_Y2bkznogpZ9-s9g6NbjXk")
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "8493446835")
 
-BINANCE_FAPI = "https://fapi.binance.com"
 SCAN_SECONDS = 30
+BINANCE_FAPI = "https://fapi.binance.com"
 
 # ============================================================
 # 2) دالة الإرسال لتليجرام
 # ============================================================
 def send_telegram(text):
+    if not BOT_TOKEN or not CHAT_ID:
+        return False
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": CHAT_ID,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True
+    }
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}
+    )
     try:
-        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-        payload = {
-            "chat_id": CHAT_ID,
-            "text": text,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": True
-        }
-        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        req = urllib.request.Request(
-            url,
-            data=data,
-            headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}
-        )
         with urllib.request.urlopen(req, timeout=10) as response:
             response.read()
-        print("✅ تم إرسال التحديث إلى تليجرام")
+        print("✅ تم إرسال التحديث والأخبار إلى تليجرام")
         return True
     except Exception as e:
-        print(f"❌ خطأ أثناء إرسال تليجرام: {e}")
+        print(f"❌ خطأ تليجرام: {e}")
         return False
 
 # ============================================================
-# 3) جلب بيانات السوق من بينانس
+# 3) جلب أحدث الأخبار العالمية والعاجلة (Crypto News Feed)
+# ============================================================
+def get_crypto_news():
+    try:
+        # واجهة الأخبار العالمية المباشرة (CoinDesk, Cointelegraph, Decrypt...)
+        url = "https://min-api.cryptocompare.com/data/v2/news/?lang=EN"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            articles = data.get("Data", [])
+            news_items = []
+            for art in articles[:2]:  # جلب أحدث خبرين عاجلين
+                title = art.get("title", "")
+                source = art.get("source_info", {}).get("name", "News")
+                news_items.append(f"📰 <b>[{source}]:</b> {title}")
+            return "\n\n".join(news_items) if news_items else "• السوق هادئ ولا توجد أخبار عاجلة."
+    except Exception:
+        return "• جاري متابعة وتحديث رادار الأخبار العالمية..."
+
+# ============================================================
+# 4) جلب بيانات أسعار السوق من بينانس
 # ============================================================
 def get_market_data():
     try:
@@ -69,53 +96,42 @@ def get_market_data():
         return []
 
 # ============================================================
-# 4) الأخبار الأكثر رواجاً من CoinGecko
-# ============================================================
-def get_trending():
-    try:
-        url = "https://api.coingecko.com/api/v3/search/trending"
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        coins = data.get("coins", [])
-        return ", ".join([f"#{c['item']['symbol']}" for c in coins[:5]])
-    except Exception:
-        return "#BTC, #ETH, #SOL, #BNB, #XRP"
-
-# ============================================================
-# 5) دورة البث المباشر
+# 5) حلقة البث المباشر للأخبار والسوق
 # ============================================================
 def run_radar():
-    print("🚀 بدء البث المباشر لرادار حكيم...")
+    print("🚀 بدء تشغيل رادار الأخبار والسوق المباشر...")
     
-    # رسالة فورية عند بدء التشغيل
     send_telegram(
-        "🟢 <b>تم تفعيل رادار حكيم بنجاح!</b>\n"
-        "📡 <i>ستصلك الآن رسائل السوق والأخبار كل 30 ثانية باستمرار.</i>"
+        "🟢 <b>تم تفعيل رادار حكيم الإخباري والفني بنجاح!</b>\n\n"
+        "📡 <i>ستصلك الآن أحدث الأخبار العالمية وعناوين الكريبتو مع أسعار السوق كل 30 ثانية باستمرار.</i>"
     )
     
     while True:
         try:
             tickers = get_market_data()
+            news_text = get_crypto_news()
+            
             if tickers:
                 by_chg = sorted(tickers, key=lambda x: x["change"], reverse=True)
                 gainers = " | ".join([f"#{g['symbol'].replace('USDT','')}: +{g['change']:.1f}%" for g in by_chg[:3]])
                 losers = " | ".join([f"#{l['symbol'].replace('USDT','')}: {l['change']:.1f}%" for l in by_chg[-3:]])
-                
                 btc_price = next((t["price"] for t in tickers if t["symbol"] == "BTCUSDT"), 0)
-                trending = get_trending()
                 
                 msg = (
-                    f"📡 <b>نبض السوق المباشر | رادار حكيم</b>\n\n"
-                    f"🪙 <b>سعر البيتكوين (BTC):</b> <code>${btc_price:,.1f}</code>\n"
-                    f"🔥 <b>الرائج عالمياً:</b> {trending}\n\n"
+                    f"📡 <b>رادار حكيم | نشرة الأخبار والأسواق المباشرة</b>\n\n"
+                    f"🪙 <b>سعر البيتكوين (BTC):</b> <code>${btc_price:,.1f}</code>\n\n"
                     f"🚀 <b>الأعلى صعوداً الآن:</b>\n{gainers}\n\n"
                     f"🔻 <b>الأعلى هبوطاً الآن:</b>\n{losers}\n\n"
+                    f"━━━━━━━━━━━━━━━━━━\n"
+                    f"🌐 <b>أحدث الأخبار العالمية العاجلة:</b>\n\n"
+                    f"{news_text}\n"
+                    f"━━━━━━━━━━━━━━━━━━\n"
                     f"⏰ <b>التوقيت:</b> <code>{datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}</code>"
                 )
                 send_telegram(msg)
             else:
-                send_telegram("📡 <i>جاري فحص وتحديث بيانات منصة بينانس...</i>")
+                send_telegram(f"📡 <b>نشرة الأخبار العالمية:</b>\n\n{news_text}")
+                
         except Exception as e:
             print(f"حدث خطأ: {e}")
             
